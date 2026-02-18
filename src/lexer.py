@@ -14,6 +14,8 @@ class TT:
     CHAR_LIT  = 'CHAR_LIT'
     STRING    = 'STRING'
     ID        = 'ID'
+    DEFINE    = 'DEFINE'    # #define NAME VALUE — value is a (name, value_str) tuple
+
 
     # Keywords — types
     INT      = 'int'
@@ -151,10 +153,35 @@ class Lexer:
             if ch in ' \t\r\n':
                 self.advance()
 
-            # Preprocessor directive: skip entire line  (#include, #define, etc.)
+            # Preprocessor directive
             elif ch == '#':
-                while self.pos < len(self.source) and self.peek() != '\n':
-                    self.advance()
+                # Read the directive word (include, define, pragma, etc.)
+                self.advance()  # consume '#'
+                directive = ''
+                while self.pos < len(self.source) and self.peek().isalpha():
+                    directive += self.advance()
+                if directive == 'define':
+                    # Skip whitespace between 'define' and name
+                    while self.pos < len(self.source) and self.peek() in ' \t':
+                        self.advance()
+                    # Read macro name
+                    name = ''
+                    while self.pos < len(self.source) and (self.peek().isalnum() or self.peek() == '_'):
+                        name += self.advance()
+                    # Skip whitespace between name and value
+                    while self.pos < len(self.source) and self.peek() in ' \t':
+                        self.advance()
+                    # Read value (rest of line)
+                    value = ''
+                    while self.pos < len(self.source) and self.peek() != '\n':
+                        value += self.advance()
+                    # Emit a DEFINE token carrying (name, value.strip())
+                    self.tokens.append(Token(TT.DEFINE, (name, value.strip()), self.line))
+                else:
+                    # #include, #pragma, etc. — skip rest of line
+                    while self.pos < len(self.source) and self.peek() != '\n':
+                        self.advance()
+
 
             # Line comment  //
             elif ch == '/' and self.peek(1) == '/':

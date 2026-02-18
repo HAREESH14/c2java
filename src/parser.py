@@ -43,10 +43,46 @@ class Parser:
 
     # ── Program ───────────────────────────────────────────────────────────────
     def parse(self):
+        defines   = []
+        globals_  = []
         functions = []
+
         while not self.match(TT.EOF):
-            functions.append(self.parse_function())
-        return ProgramNode(functions)
+            # #define constant
+            if self.match(TT.DEFINE):
+                tok = self.advance()
+                name, val = tok.value
+                defines.append(DefineNode(name, val))
+
+            # Global variable:  type ID ;  OR  type ID = expr ;
+            # (type followed by ID followed by ; or = — NOT a function)
+            elif self.current().type in TYPES and self._is_global_var():
+                globals_.append(self.parse_global_var())
+
+            # Function definition
+            else:
+                functions.append(self.parse_function())
+
+        return ProgramNode(functions, defines, globals_)
+
+    def _is_global_var(self):
+        """Peek ahead: type ID ( → function;  type ID ; or = → global var."""
+        i = self.pos + 1   # skip type token
+        if i < len(self.tokens) and self.tokens[i].type == TT.ID:
+            j = i + 1
+            if j < len(self.tokens):
+                return self.tokens[j].type in (TT.SEMI, TT.ASSIGN)
+        return False
+
+    def parse_global_var(self):
+        type_ = self.expect_type()
+        name  = self.expect(TT.ID).value
+        init  = None
+        if self.match(TT.ASSIGN):
+            self.advance()
+            init = self.parse_expression()
+        self.expect(TT.SEMI)
+        return GlobalVarNode(type_, name, init)
 
     # ── Function declaration ──────────────────────────────────────────────────
     def parse_function(self):
@@ -116,6 +152,18 @@ class Parser:
         if cur.type == TT.BREAK:    return self.parse_break()
         if cur.type == TT.CONTINUE: return self.parse_continue()
 
+        # Feature 3: Prefix ++/-- as statement:  ++i;  --i;
+        if cur.type == TT.INC:
+            self.advance()
+            name = self.expect(TT.ID).value
+            self.expect(TT.SEMI)
+            return PrefixUpdateNode('++', name)
+        if cur.type == TT.DEC:
+            self.advance()
+            name = self.expect(TT.ID).value
+            self.expect(TT.SEMI)
+            return PrefixUpdateNode('--', name)
+
         # ID-starting statements: assignment, compound assign, array assign, function call
         if cur.type == TT.ID:
             return self.parse_id_statement()
@@ -165,6 +213,21 @@ class Parser:
         if self.match(TT.ASSIGN):
             self.advance()
             initializer = self.parse_expression()
+
+        # ── Feature 1: Multi-variable declaration  int a, b, c = 5; ──
+        if self.match(TT.COMMA):
+            declarators = [(name, initializer)]
+            while self.match(TT.COMMA):
+                self.advance()
+                n2   = self.expect(TT.ID).value
+                ini2 = None
+                if self.match(TT.ASSIGN):
+                    self.advance()
+                    ini2 = self.parse_expression()
+                declarators.append((n2, ini2))
+            self.expect(TT.SEMI)
+            return MultiVarDeclNode(type_, declarators)
+
         self.expect(TT.SEMI)
         return VarDeclNode(type_, name, initializer)
 
@@ -239,6 +302,16 @@ class Parser:
             value = self.parse_expression()
             self.expect(TT.SEMI)
             return CompoundAssignNode(name, op, value)
+
+        # Postfix ++/-- as statement:  i++;  i--;
+        if self.match(TT.INC):
+            self.advance()
+            self.expect(TT.SEMI)
+            return UpdateNode(name, '++')
+        if self.match(TT.DEC):
+            self.advance()
+            self.expect(TT.SEMI)
+            return UpdateNode(name, '--')
 
         # Simple assignment:  x = expr;
         self.expect(TT.ASSIGN)
@@ -538,6 +611,15 @@ class Parser:
         if self.match(TT.BITNOT):
             op = self.advance().value
             return UnaryOpNode(op, self.parse_unary())
+        # Feature 3: Prefix ++/-- as expression  ++i  --i
+        if self.match(TT.INC):
+            self.advance()
+            name = self.expect(TT.ID).value
+            return PrefixUpdateNode('++', name)
+        if self.match(TT.DEC):
+            self.advance()
+            name = self.expect(TT.ID).value
+            return PrefixUpdateNode('--', name)
         return self.parse_primary()
 
     def parse_primary(self):
@@ -548,8 +630,16 @@ class Parser:
         if tok.type == TT.CHAR_LIT:  self.advance(); return CharLiteralNode(tok.value)
         if tok.type == TT.STRING:    self.advance(); return StringLiteralNode(tok.value)
 
-        # Parenthesised expression
+        # Parenthesised expression OR type cast  (int)x
         if tok.type == TT.LPAREN:
+            # Feature 4: Type cast — (type) expr
+            if self.peek(1).type in TYPES:
+                self.advance()                     # (
+                cast_type = self.expect_type()     # int / float / etc.
+                self.expect(TT.RPAREN)             # )
+                expr = self.parse_unary()          # the expression being cast
+                return CastNode(cast_type, expr)
+            # Normal parenthesised expression
             self.advance()
             expr = self.parse_expression()
             self.expect(TT.RPAREN)

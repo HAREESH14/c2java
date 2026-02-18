@@ -12,9 +12,29 @@ class ASTNode:
 
 # ── Program ───────────────────────────────────────────────────────────────────
 class ProgramNode(ASTNode):
-    """Root of the AST. Contains all functions."""
-    def __init__(self, functions):
+    """Root of the AST. Contains defines, global vars, and functions."""
+    def __init__(self, functions, defines=None, globals_=None):
         self.functions = functions   # list of FunctionNode
+        self.defines   = defines or []   # list of DefineNode
+        self.globals_  = globals_ or []  # list of GlobalVarNode
+
+
+# ── Preprocessor ──────────────────────────────────────────────────────────────
+class DefineNode(ASTNode):
+    """#define NAME VALUE  →  Java static final type NAME = VALUE;"""
+    def __init__(self, name, value_str):
+        self.name      = name        # str: macro name e.g. 'MAX'
+        self.value_str = value_str   # str: raw value e.g. '100' or '3.14'
+
+
+# ── Global variables ──────────────────────────────────────────────────────────
+class GlobalVarNode(ASTNode):
+    """A variable declared outside any function → Java static field."""
+    def __init__(self, type_, name, initializer=None):
+        self.type_       = type_
+        self.name        = name
+        self.initializer = initializer
+
 
 
 # ── Functions ─────────────────────────────────────────────────────────────────
@@ -52,6 +72,31 @@ class VarDeclNode(ASTNode):
         self.type_       = type_         # str
         self.name        = name          # str
         self.initializer = initializer   # expression ASTNode or None
+
+
+class MultiVarDeclNode(ASTNode):
+    """
+    Multi-variable declaration.  int a, b, c = 5;
+    Stored as a list of (name, initializer_or_None) pairs, all same type.
+    """
+    def __init__(self, type_, declarators):
+        self.type_       = type_          # str
+        self.declarators = declarators    # list of (name_str, expr_or_None)
+
+
+class PrefixUpdateNode(ASTNode):
+    """Prefix increment/decrement as expression.  ++i  OR  --i"""
+    def __init__(self, op, name):
+        self.op   = op    # '++' or '--'
+        self.name = name  # str
+
+
+class CastNode(ASTNode):
+    """Type cast expression.  (int)x  OR  (float)n"""
+    def __init__(self, type_, expr):
+        self.type_ = type_   # str: 'int', 'float', etc.
+        self.expr  = expr    # expr ASTNode
+
 
 
 class ArrayDeclNode(ASTNode):

@@ -1,42 +1,26 @@
+import java.util.Scanner;
+
 public class Main {
 
     public static void main(String[] args) {
-        int day = 3;
-        switch (day) {
-            case 1:
-                System.out.println("Monday");
-                break;
-            case 2:
-                System.out.println("Tuesday");
-                break;
-            case 3:
-                System.out.println("Wednesday");
-                break;
-            case 4:
-                System.out.println("Thursday");
-                break;
-            case 5:
-                System.out.println("Friday");
-                break;
-            default:
-                System.out.println("Weekend");
-                break;
+        Scanner sc = new Scanner(System.in);
+        int n;
+        System.out.println("Enter a number: ");
+        n = sc.nextInt();
+        int abs_val = (n >= 0 ? n : -n);
+        System.out.printf("Absolute value: %d%n", abs_val);
+        System.out.println("Even or odd: ");
+        int is_even = (n % 2 == 0 ? 1 : 0);
+        if (is_even) {
+            System.out.println("Even");
+        } else {
+            System.out.println("Odd");
         }
-        char grade = 'B';
-        switch (grade) {
-            case 'A':
-                System.out.println("Excellent");
-                break;
-            case 'B':
-                System.out.println("Good");
-                break;
-            case 'C':
-                System.out.println("Average");
-                break;
-            default:
-                System.out.println("Below average");
-                break;
-        }
+        int a;
+        int b;
+        a = sc.nextInt();
+        b = sc.nextInt();
+        System.out.printf("Sum: %d%n", a + b);
         return;
     }
 

@@ -72,12 +72,26 @@ class CToJavaVisitor:
         lines.append('')
 
         self.indent_level = 1
+        ind = self.indent()
+
+        # Emit #define constants as  static final int NAME = VALUE;
+        for d in node.defines:
+            lines.append(self.visit_DefineNode(d))
+
+        # Emit global variables as  static type name = value;
+        for g in node.globals_:
+            lines.append(self.visit_GlobalVarNode(g))
+
+        if node.defines or node.globals_:
+            lines.append('')
+
         for fn in node.functions:
             lines.append(self.visit(fn))
             lines.append('')
 
         lines.append('}')
         return '\n'.join(lines)
+
 
     def _detect_scanner(self, node):
         """Walk the entire AST to check if any ScanfNode exists."""
@@ -178,8 +192,60 @@ class CToJavaVisitor:
         return f'{t} {node.name}'
 
     # ═══════════════════════════════════════════════════════════════════════
-    #  Block { statements }
+    #  Feature 2 — #define NAME VALUE  →  static final type NAME = VALUE;
     # ═══════════════════════════════════════════════════════════════════════
+    def visit_DefineNode(self, node):
+        ind = self.indent()
+        val = node.value_str.strip()
+        # Determine Java type from value: float if has '.', else int
+        if '.' in val:
+            java_type = 'double'
+            val_out   = val + ('' if val.endswith('f') or val.endswith('d') else '')
+        else:
+            java_type = 'int'
+            val_out   = val
+        return f'{ind}static final {java_type} {node.name} = {val_out};'
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Feature 5 — Global variable  →  static type name = value;
+    # ═══════════════════════════════════════════════════════════════════════
+    def visit_GlobalVarNode(self, node):
+        ind = self.indent()
+        t   = self.translate_type(node.type_)
+        if node.initializer is not None:
+            return f'{ind}static {t} {node.name} = {self.visit(node.initializer)};'
+        return f'{ind}static {t} {node.name};'
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Feature 1 — Multi-variable declaration
+    #  int a, b, c = 5;  →  int a; int b; int c = 5;
+    # ═══════════════════════════════════════════════════════════════════════
+    def visit_MultiVarDeclNode(self, node):
+        t     = self.translate_type(node.type_)
+        parts = []
+        for name, init in node.declarators:
+            if init is not None:
+                parts.append(f'{t} {name} = {self.visit(init)};')
+            else:
+                parts.append(f'{t} {name};')
+        # Join with newline + current indent so each var is on its own line
+        ind = self.indent()
+        return ('\n' + ind).join(parts)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Feature 3 — Prefix ++/--  →  ++name  /  --name
+    # ═══════════════════════════════════════════════════════════════════════
+    def visit_PrefixUpdateNode(self, node):
+        return f'{node.op}{node.name}'
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Feature 4 — Type cast  (int)x  →  (int)x   (same in Java)
+    # ═══════════════════════════════════════════════════════════════════════
+    def visit_CastNode(self, node):
+        t = self.translate_type(node.type_)
+        return f'({t}){self.visit(node.expr)}'
+
+
     def visit_BlockNode(self, node):
         lines = ['{']
         self.indent_level += 1
@@ -190,7 +256,12 @@ class CToJavaVisitor:
             self._scanner_declared = True
 
         for stmt in node.statements:
-            lines.append(self.indent() + self.visit(stmt))
+            code = self.visit(stmt)
+            # PrefixUpdateNode (++i / --i) as a statement needs a semicolon
+            if isinstance(stmt, PrefixUpdateNode):
+                code += ';'
+            lines.append(self.indent() + code)
+
 
         self.indent_level -= 1
         lines.append(self.indent() + '}')
