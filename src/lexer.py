@@ -45,6 +45,9 @@ class TT:
     PRINTF = 'printf'
     SCANF  = 'scanf'
 
+    # Keywords — struct
+    STRUCT = 'struct'
+
     # Arithmetic operators
     PLUS   = '+'
     MINUS  = '-'
@@ -98,6 +101,8 @@ class TT:
     RBRACK = ']'
     SEMI   = ';'
     COMMA  = ','
+    DOT    = '.'    # struct member access:  p.x
+
 
     EOF = 'EOF'
 
@@ -111,6 +116,8 @@ KEYWORDS = {
     'break', 'continue', 'switch', 'case', 'default',
     # I/O
     'printf', 'scanf',
+    # Struct
+    'struct',
 }
 
 
@@ -301,7 +308,8 @@ class Lexer:
                 '(': TT.LPAREN, ')': TT.RPAREN,
                 '{': TT.LBRACE, '}': TT.RBRACE,
                 '[': TT.LBRACK, ']': TT.RBRACK,
-                ';': TT.SEMI,   ',': TT.COMMA,
+                ';': TT.SEMI,   ',': TT.COMMA,  '.': TT.DOT,
+
             }
             if ch in single_map:
                 self.advance()

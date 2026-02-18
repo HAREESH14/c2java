@@ -45,6 +45,7 @@ class Parser:
     def parse(self):
         defines   = []
         globals_  = []
+        structs   = []
         functions = []
 
         while not self.match(TT.EOF):
@@ -54,8 +55,16 @@ class Parser:
                 name, val = tok.value
                 defines.append(DefineNode(name, val))
 
+            # struct definition:  struct NAME { ... };
+            elif self.match(TT.STRUCT):
+                # peek: struct NAME { → definition
+                #        struct NAME ID → global struct variable
+                if self._is_struct_def():
+                    structs.append(self.parse_struct_def())
+                else:
+                    globals_.append(self.parse_struct_var_decl())
+
             # Global variable:  type ID ;  OR  type ID = expr ;
-            # (type followed by ID followed by ; or = — NOT a function)
             elif self.current().type in TYPES and self._is_global_var():
                 globals_.append(self.parse_global_var())
 
@@ -63,7 +72,48 @@ class Parser:
             else:
                 functions.append(self.parse_function())
 
-        return ProgramNode(functions, defines, globals_)
+        return ProgramNode(functions, defines, globals_, structs)
+
+    def _is_struct_def(self):
+        """Peek: struct NAME { → True (definition).  struct NAME ID → False (var)."""
+        i = self.pos + 1   # skip 'struct'
+        if i < len(self.tokens) and self.tokens[i].type == TT.ID:
+            j = i + 1
+            if j < len(self.tokens):
+                return self.tokens[j].type == TT.LBRACE
+        return False
+
+    def parse_struct_def(self):
+        """Parse:  struct NAME { type field; ... };"""
+        self.expect(TT.STRUCT)
+        name = self.expect(TT.ID).value
+        self.expect(TT.LBRACE)
+        fields = []
+        while not self.match(TT.RBRACE):
+            ftype = self.expect_type()
+            fname = self.expect(TT.ID).value
+            self.expect(TT.SEMI)
+            fields.append((ftype, fname))
+        self.expect(TT.RBRACE)
+        self.expect(TT.SEMI)
+        return StructDefNode(name, fields)
+
+    def parse_struct_var_decl(self):
+        """Parse:  struct NAME varname;  OR  struct NAME varname = {v1, v2};"""
+        self.expect(TT.STRUCT)
+        struct_name = self.expect(TT.ID).value
+        var_name    = self.expect(TT.ID).value
+        init_values = None
+        if self.match(TT.ASSIGN):
+            self.advance()
+            self.expect(TT.LBRACE)
+            init_values = [self.parse_expression()]
+            while self.match(TT.COMMA):
+                self.advance()
+                init_values.append(self.parse_expression())
+            self.expect(TT.RBRACE)
+        self.expect(TT.SEMI)
+        return StructVarDeclNode(struct_name, var_name, init_values)
 
     def _is_global_var(self):
         """Peek ahead: type ID ( → function;  type ID ; or = → global var."""
@@ -83,6 +133,8 @@ class Parser:
             init = self.parse_expression()
         self.expect(TT.SEMI)
         return GlobalVarNode(type_, name, init)
+
+
 
     # ── Function declaration ──────────────────────────────────────────────────
     def parse_function(self):
@@ -151,6 +203,11 @@ class Parser:
         if cur.type == TT.RETURN:   return self.parse_return()
         if cur.type == TT.BREAK:    return self.parse_break()
         if cur.type == TT.CONTINUE: return self.parse_continue()
+
+        # Struct variable declaration inside a function:  struct Point p;
+        if cur.type == TT.STRUCT:
+            return self.parse_struct_var_decl()
+
 
         # Feature 3: Prefix ++/-- as statement:  ++i;  --i;
         if cur.type == TT.INC:
@@ -285,6 +342,15 @@ class Parser:
             self.expect(TT.SEMI)
             return ArrayAssignNode(name, index, value)
 
+        # Struct member assignment:  p.field = expr;
+        if self.match(TT.DOT):
+            self.advance()
+            member = self.expect(TT.ID).value
+            self.expect(TT.ASSIGN)
+            value = self.parse_expression()
+            self.expect(TT.SEMI)
+            return MemberAssignNode(name, member, value)
+
         # Function call statement:  myFunc(a, b);
         if self.match(TT.LPAREN):
             self.advance()
@@ -294,6 +360,7 @@ class Parser:
             self.expect(TT.RPAREN)
             self.expect(TT.SEMI)
             return FuncCallStmtNode(name, args)
+
 
         # ── Bug 5 Fix: compound assignment operators as statements ──
         COMPOUND_OPS = {TT.PLUSEQ, TT.MINUSEQ, TT.STAREQ, TT.SLASHEQ, TT.MODEQ}
@@ -676,7 +743,14 @@ class Parser:
                 self.expect(TT.RPAREN)
                 return FuncCallExprNode(name, args)
 
+            # Struct member access expression:  p.x
+            if self.match(TT.DOT):
+                self.advance()
+                member = self.expect(TT.ID).value
+                return MemberAccessNode(name, member)
+
             return IDNode(name)
+
 
         raise SyntaxError(
             f'[Parser] Line {tok.line}: Unexpected token in expression: {tok.value!r}'

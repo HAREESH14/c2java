@@ -12,11 +12,13 @@ class ASTNode:
 
 # ── Program ───────────────────────────────────────────────────────────────────
 class ProgramNode(ASTNode):
-    """Root of the AST. Contains defines, global vars, and functions."""
-    def __init__(self, functions, defines=None, globals_=None):
-        self.functions = functions   # list of FunctionNode
-        self.defines   = defines or []   # list of DefineNode
+    """Root of the AST. Contains defines, global vars, structs, and functions."""
+    def __init__(self, functions, defines=None, globals_=None, structs=None):
+        self.functions = functions        # list of FunctionNode
+        self.defines   = defines  or []  # list of DefineNode
         self.globals_  = globals_ or []  # list of GlobalVarNode
+        self.structs   = structs  or []  # list of StructDefNode
+
 
 
 # ── Preprocessor ──────────────────────────────────────────────────────────────
@@ -25,6 +27,44 @@ class DefineNode(ASTNode):
     def __init__(self, name, value_str):
         self.name      = name        # str: macro name e.g. 'MAX'
         self.value_str = value_str   # str: raw value e.g. '100' or '3.14'
+
+
+# ── Struct ──────────────────────────────────────────────────────────────────────────────
+class StructDefNode(ASTNode):
+    """
+    struct Point { int x; int y; };
+    → Java:  static class Point { int x; int y; Point(int x,int y){...} }
+    """
+    def __init__(self, name, fields):
+        self.name   = name    # str: struct tag, e.g. 'Point'
+        self.fields = fields  # list of (type_str, field_name_str)
+
+
+class StructVarDeclNode(ASTNode):
+    """
+    struct Point p;          →  Point p;
+    struct Point p = {1,2}; →  Point p = new Point(1, 2);
+    """
+    def __init__(self, struct_name, var_name, init_values=None):
+        self.struct_name = struct_name   # str: 'Point'
+        self.var_name    = var_name      # str: 'p'
+        self.init_values = init_values   # list of expr ASTNode | None
+
+
+class MemberAccessNode(ASTNode):
+    """p.x  →  p.x  (same in Java)"""
+    def __init__(self, obj, member):
+        self.obj    = obj     # str: variable name
+        self.member = member  # str: field name
+
+
+class MemberAssignNode(ASTNode):
+    """p.x = expr;  →  p.x = expr;"""
+    def __init__(self, obj, member, value):
+        self.obj    = obj     # str
+        self.member = member  # str
+        self.value  = value   # expr ASTNode
+
 
 
 # ── Global variables ──────────────────────────────────────────────────────────

@@ -72,7 +72,11 @@ class CToJavaVisitor:
         lines.append('')
 
         self.indent_level = 1
-        ind = self.indent()
+
+        # Emit struct definitions as inner static classes
+        for s in node.structs:
+            lines.append(self.visit_StructDefNode(s))
+            lines.append('')
 
         # Emit #define constants as  static final int NAME = VALUE;
         for d in node.defines:
@@ -82,7 +86,7 @@ class CToJavaVisitor:
         for g in node.globals_:
             lines.append(self.visit_GlobalVarNode(g))
 
-        if node.defines or node.globals_:
+        if node.defines or node.globals_ or node.structs:
             lines.append('')
 
         for fn in node.functions:
@@ -91,6 +95,52 @@ class CToJavaVisitor:
 
         lines.append('}')
         return '\n'.join(lines)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Struct → Java static inner class
+    # ═══════════════════════════════════════════════════════════════════════
+    def visit_StructDefNode(self, node):
+        ind  = '    ' * self.indent_level
+        ind2 = '    ' * (self.indent_level + 1)
+        ind3 = '    ' * (self.indent_level + 2)
+        lines = [f'{ind}static class {node.name} {{']
+
+        # Fields
+        for ftype, fname in node.fields:
+            jtype = self.translate_type(ftype)
+            lines.append(f'{ind2}{jtype} {fname};')
+
+        # All-args constructor
+        params = ', '.join(
+            f'{self.translate_type(ft)} {fn}' for ft, fn in node.fields
+        )
+        lines.append(f'{ind2}{node.name}({params}) {{')
+        for _, fname in node.fields:
+            lines.append(f'{ind3}this.{fname} = {fname};')
+        lines.append(f'{ind2}}}')
+
+        # Default no-arg constructor so  Point p;  compiles
+        lines.append(f'{ind2}{node.name}() {{}}')
+
+        lines.append(f'{ind}}}')
+        return '\n'.join(lines)
+
+
+    def visit_StructVarDeclNode(self, node):
+        sn = node.struct_name
+        vn = node.var_name
+        if node.init_values:
+            args = ', '.join(self.visit(v) for v in node.init_values)
+            return f'{sn} {vn} = new {sn}({args});'
+        return f'{sn} {vn} = new {sn}();'
+
+    def visit_MemberAccessNode(self, node):
+        return f'{node.obj}.{node.member}'
+
+    def visit_MemberAssignNode(self, node):
+        return f'{node.obj}.{node.member} = {self.visit(node.value)};'
+
+
 
 
     def _detect_scanner(self, node):
@@ -472,8 +522,12 @@ class CToJavaVisitor:
     #  R19 — Function call statement:  myFunc(a, b);
     # ═══════════════════════════════════════════════════════════════════════
     def visit_FuncCallStmtNode(self, node):
+        translated = self._translate_string_func(node.name, node.args)
+        if translated is not None:
+            return translated + ';'
         args = ', '.join(self.visit(a) for a in node.args)
         return f'{node.name}({args});'
+
 
     # ═══════════════════════════════════════════════════════════════════════
     #  R20 — Binary operations
@@ -506,8 +560,104 @@ class CToJavaVisitor:
 
     # ── Function call expression ──────────────────────────────────────────
     def visit_FuncCallExprNode(self, node):
+        translated = self._translate_string_func(node.name, node.args)
+        if translated is not None:
+            return translated
         args = ', '.join(self.visit(a) for a in node.args)
         return f'{node.name}({args})'
+
+    def _translate_string_func(self, name, args):
+        """
+        Translate C standard library calls to Java equivalents.
+        Returns the Java expression string, or None if not a known C library function.
+        """
+        a = [self.visit(x) for x in args]
+
+        # ── string.h ──────────────────────────────────────────────────────────
+        if name == 'strlen'  and len(a) == 1:
+            return f'{a[0]}.length()'
+
+        if name == 'strcpy'  and len(a) == 2:
+            return f'{a[0]} = {a[1]}'
+
+        if name == 'strcat'  and len(a) == 2:
+            return f'{a[0]} = {a[0]} + {a[1]}'
+
+        if name == 'strcmp'  and len(a) == 2:
+            return f'{a[0]}.compareTo({a[1]})'
+
+        if name == 'strchr'  and len(a) == 2:
+            return f'{a[0]}.indexOf({a[1]}) >= 0'
+
+        if name == 'strstr'  and len(a) == 2:
+            return f'{a[0]}.contains({a[1]})'
+
+        if name == 'strrev'  and len(a) == 1:
+            return f'new StringBuilder({a[0]}).reverse().toString()'
+
+        if name == 'strupr'  and len(a) == 1:
+            return f'{a[0]}.toUpperCase()'
+
+        if name == 'strlwr'  and len(a) == 1:
+            return f'{a[0]}.toLowerCase()'
+
+        if name == 'sprintf' and len(a) >= 2:
+            buf  = a[0]
+            fmt  = a[1]
+            rest = ', '.join(a[2:])
+            if rest:
+                return f'{buf} = String.format({fmt}, {rest})'
+            return f'{buf} = String.format({fmt})'
+
+        # ── stdlib.h — conversion ─────────────────────────────────────────────
+        if name == 'atoi'    and len(a) == 1:
+            return f'Integer.parseInt({a[0]})'
+
+        if name == 'atof'    and len(a) == 1:
+            return f'Double.parseDouble({a[0]})'
+
+        if name == 'atol'    and len(a) == 1:
+            return f'Long.parseLong({a[0]})'
+
+        # ── ctype.h — character classification ───────────────────────────────
+        if name == 'toupper' and len(a) == 1:
+            return f'Character.toUpperCase({a[0]})'
+
+        if name == 'tolower' and len(a) == 1:
+            return f'Character.toLowerCase({a[0]})'
+
+        if name == 'isalpha' and len(a) == 1:
+            return f'Character.isLetter({a[0]})'
+
+        if name == 'isdigit' and len(a) == 1:
+            return f'Character.isDigit({a[0]})'
+
+        if name == 'isspace' and len(a) == 1:
+            return f'Character.isWhitespace({a[0]})'
+
+        if name == 'isupper' and len(a) == 1:
+            return f'Character.isUpperCase({a[0]})'
+
+        if name == 'islower' and len(a) == 1:
+            return f'Character.isLowerCase({a[0]})'
+
+        # ── math.h ────────────────────────────────────────────────────────────
+        MATH_ONE = {'sqrt', 'abs', 'fabs', 'ceil', 'floor', 'round',
+                    'log', 'log10', 'sin', 'cos', 'tan'}
+        if name in MATH_ONE and len(a) == 1:
+            java_name = 'abs' if name == 'fabs' else name
+            return f'Math.{java_name}({a[0]})'
+
+        if name == 'pow'     and len(a) == 2:
+            return f'Math.pow({a[0]}, {a[1]})'
+
+        if name == 'rand'    and len(a) == 0:
+            return '(int)(Math.random() * 32767)'
+
+        # Not a known C library function — leave as user-defined
+        return None
+
+
 
     # ── Literals ──────────────────────────────────────────────────────────
     def visit_IntLiteralNode(self, node):
