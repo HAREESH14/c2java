@@ -15,40 +15,77 @@ class TT:
     STRING    = 'STRING'
     ID        = 'ID'
 
-    # Keywords
-    INT    = 'int'
-    FLOAT  = 'float'
-    DOUBLE = 'double'
-    CHAR   = 'char'
-    VOID   = 'void'
-    IF     = 'if'
-    ELSE   = 'else'
-    FOR    = 'for'
-    WHILE  = 'while'
-    DO     = 'do'
-    RETURN = 'return'
-    PRINTF = 'printf'
+    # Keywords — types
+    INT      = 'int'
+    FLOAT    = 'float'
+    DOUBLE   = 'double'
+    CHAR     = 'char'
+    VOID     = 'void'
+    LONG     = 'long'
+    SHORT    = 'short'
+    UNSIGNED = 'unsigned'
+    BOOL     = 'bool'
 
-    # Operators
+    # Keywords — control flow
+    IF       = 'if'
+    ELSE     = 'else'
+    FOR      = 'for'
+    WHILE    = 'while'
+    DO       = 'do'
+    RETURN   = 'return'
+    BREAK    = 'break'
+    CONTINUE = 'continue'
+    SWITCH   = 'switch'
+    CASE     = 'case'
+    DEFAULT  = 'default'
+
+    # Keywords — I/O
+    PRINTF = 'printf'
+    SCANF  = 'scanf'
+
+    # Arithmetic operators
     PLUS   = '+'
     MINUS  = '-'
     STAR   = '*'
     SLASH  = '/'
     MOD    = '%'
-    EQ     = '=='
-    NEQ    = '!='
-    LT     = '<'
-    GT     = '>'
-    LTE    = '<='
-    GTE    = '>='
-    AND    = '&&'
-    OR     = '||'
-    NOT    = '!'
-    ASSIGN = '='
-    PLUSEQ = '+='
-    MINUSEQ= '-='
-    INC    = '++'
-    DEC    = '--'
+
+    # Comparison operators
+    EQ  = '=='
+    NEQ = '!='
+    LT  = '<'
+    GT  = '>'
+    LTE = '<='
+    GTE = '>='
+
+    # Logical operators
+    AND = '&&'
+    OR  = '||'
+    NOT = '!'
+
+    # Assignment operators
+    ASSIGN  = '='
+    PLUSEQ  = '+='
+    MINUSEQ = '-='
+    STAREQ  = '*='
+    SLASHEQ = '/='
+    MODEQ   = '%='
+
+    # Increment / decrement
+    INC = '++'
+    DEC = '--'
+
+    # Bitwise operators
+    BITAND = '&'
+    BITOR  = '|'
+    BITXOR = '^'
+    BITNOT = '~'
+    LSHIFT = '<<'
+    RSHIFT = '>>'
+
+    # Ternary
+    QUESTION = '?'
+    COLON    = ':'
 
     # Delimiters
     LPAREN = '('
@@ -60,12 +97,20 @@ class TT:
     SEMI   = ';'
     COMMA  = ','
 
-    EOF    = 'EOF'
+    EOF = 'EOF'
+
 
 KEYWORDS = {
+    # Types
     'int', 'float', 'double', 'char', 'void',
-    'if', 'else', 'for', 'while', 'do', 'return', 'printf'
+    'long', 'short', 'unsigned', 'bool',
+    # Control
+    'if', 'else', 'for', 'while', 'do', 'return',
+    'break', 'continue', 'switch', 'case', 'default',
+    # I/O
+    'printf', 'scanf',
 }
+
 
 class Token:
     def __init__(self, type_, value, line=0):
@@ -101,13 +146,21 @@ class Lexer:
     def skip_whitespace_and_comments(self):
         while self.pos < len(self.source):
             ch = self.peek()
+
             # Whitespace
             if ch in ' \t\r\n':
                 self.advance()
+
+            # Preprocessor directive: skip entire line  (#include, #define, etc.)
+            elif ch == '#':
+                while self.pos < len(self.source) and self.peek() != '\n':
+                    self.advance()
+
             # Line comment  //
             elif ch == '/' and self.peek(1) == '/':
                 while self.pos < len(self.source) and self.peek() != '\n':
                     self.advance()
+
             # Block comment  /* ... */
             elif ch == '/' and self.peek(1) == '*':
                 self.advance(); self.advance()
@@ -172,6 +225,10 @@ class Lexer:
                     if self.peek() == '.':
                         is_float = True
                     num += self.advance()
+                # consume optional f/F/l/L suffix
+                if self.peek() in ('f', 'F', 'l', 'L'):
+                    self.advance()
+                    is_float = True
                 tt = TT.FLOAT_LIT if is_float else TT.INT_LIT
                 self.tokens.append(Token(tt, num, line))
                 continue
@@ -185,24 +242,36 @@ class Lexer:
                 self.tokens.append(Token(tt, word, line))
                 continue
 
+            # ── Three-character operators (must check before two-char) ─────
+            three = ch + self.peek(1) + self.peek(2)
+            # (none currently needed, placeholder for future)
+
             # ── Two-character operators ───────────────────────────────────
             two = ch + self.peek(1)
-            if two == '++': self.advance(); self.advance(); self.tokens.append(Token(TT.INC,    '++', line)); continue
-            if two == '--': self.advance(); self.advance(); self.tokens.append(Token(TT.DEC,    '--', line)); continue
-            if two == '==': self.advance(); self.advance(); self.tokens.append(Token(TT.EQ,     '==', line)); continue
-            if two == '!=': self.advance(); self.advance(); self.tokens.append(Token(TT.NEQ,    '!=', line)); continue
-            if two == '<=': self.advance(); self.advance(); self.tokens.append(Token(TT.LTE,    '<=', line)); continue
-            if two == '>=': self.advance(); self.advance(); self.tokens.append(Token(TT.GTE,    '>=', line)); continue
-            if two == '&&': self.advance(); self.advance(); self.tokens.append(Token(TT.AND,    '&&', line)); continue
-            if two == '||': self.advance(); self.advance(); self.tokens.append(Token(TT.OR,     '||', line)); continue
-            if two == '+=': self.advance(); self.advance(); self.tokens.append(Token(TT.PLUSEQ, '+=', line)); continue
-            if two == '-=': self.advance(); self.advance(); self.tokens.append(Token(TT.MINUSEQ,'-=', line)); continue
+            if two == '++':  self.advance(); self.advance(); self.tokens.append(Token(TT.INC,    '++', line)); continue
+            if two == '--':  self.advance(); self.advance(); self.tokens.append(Token(TT.DEC,    '--', line)); continue
+            if two == '==':  self.advance(); self.advance(); self.tokens.append(Token(TT.EQ,     '==', line)); continue
+            if two == '!=':  self.advance(); self.advance(); self.tokens.append(Token(TT.NEQ,    '!=', line)); continue
+            if two == '<=':  self.advance(); self.advance(); self.tokens.append(Token(TT.LTE,    '<=', line)); continue
+            if two == '>=':  self.advance(); self.advance(); self.tokens.append(Token(TT.GTE,    '>=', line)); continue
+            if two == '&&':  self.advance(); self.advance(); self.tokens.append(Token(TT.AND,    '&&', line)); continue
+            if two == '||':  self.advance(); self.advance(); self.tokens.append(Token(TT.OR,     '||', line)); continue
+            if two == '+=':  self.advance(); self.advance(); self.tokens.append(Token(TT.PLUSEQ, '+=', line)); continue
+            if two == '-=':  self.advance(); self.advance(); self.tokens.append(Token(TT.MINUSEQ,'-=', line)); continue
+            if two == '*=':  self.advance(); self.advance(); self.tokens.append(Token(TT.STAREQ, '*=', line)); continue
+            if two == '/=':  self.advance(); self.advance(); self.tokens.append(Token(TT.SLASHEQ,'/=', line)); continue
+            if two == '%=':  self.advance(); self.advance(); self.tokens.append(Token(TT.MODEQ,  '%=', line)); continue
+            if two == '<<':  self.advance(); self.advance(); self.tokens.append(Token(TT.LSHIFT, '<<', line)); continue
+            if two == '>>':  self.advance(); self.advance(); self.tokens.append(Token(TT.RSHIFT, '>>', line)); continue
 
             # ── Single-character tokens ───────────────────────────────────
             single_map = {
-                '+': TT.PLUS, '-': TT.MINUS, '*': TT.STAR, '/': TT.SLASH,
-                '%': TT.MOD,  '<': TT.LT,    '>': TT.GT,   '!': TT.NOT,
-                '=': TT.ASSIGN, '(': TT.LPAREN, ')': TT.RPAREN,
+                '+': TT.PLUS,  '-': TT.MINUS,  '*': TT.STAR,   '/': TT.SLASH,
+                '%': TT.MOD,   '<': TT.LT,     '>': TT.GT,     '!': TT.NOT,
+                '=': TT.ASSIGN,
+                '&': TT.BITAND, '|': TT.BITOR, '^': TT.BITXOR, '~': TT.BITNOT,
+                '?': TT.QUESTION, ':': TT.COLON,
+                '(': TT.LPAREN, ')': TT.RPAREN,
                 '{': TT.LBRACE, '}': TT.RBRACE,
                 '[': TT.LBRACK, ']': TT.RBRACK,
                 ';': TT.SEMI,   ',': TT.COMMA,

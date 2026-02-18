@@ -7,7 +7,8 @@
 from lexer import TT, Token
 from ast_nodes import *
 
-TYPES = {TT.INT, TT.FLOAT, TT.DOUBLE, TT.CHAR, TT.VOID}
+TYPES = {TT.INT, TT.FLOAT, TT.DOUBLE, TT.CHAR, TT.VOID,
+         TT.LONG, TT.SHORT, TT.UNSIGNED, TT.BOOL}
 
 
 class Parser:
@@ -82,7 +83,8 @@ class Parser:
         is_arr = False
         if self.match(TT.LBRACK):
             self.advance()
-            self.expect(TT.RBRACK)
+            if self.match(TT.RBRACK):
+                self.advance()
             is_arr = True
         return ParamNode(type_, name, is_arr)
 
@@ -103,31 +105,18 @@ class Parser:
         if cur.type in TYPES:
             return self.parse_declaration()
 
-        # if statement
-        if cur.type == TT.IF:
-            return self.parse_if()
+        if cur.type == TT.IF:       return self.parse_if()
+        if cur.type == TT.FOR:      return self.parse_for()
+        if cur.type == TT.WHILE:    return self.parse_while()
+        if cur.type == TT.DO:       return self.parse_do_while()
+        if cur.type == TT.SWITCH:   return self.parse_switch()
+        if cur.type == TT.PRINTF:   return self.parse_printf()
+        if cur.type == TT.SCANF:    return self.parse_scanf()
+        if cur.type == TT.RETURN:   return self.parse_return()
+        if cur.type == TT.BREAK:    return self.parse_break()
+        if cur.type == TT.CONTINUE: return self.parse_continue()
 
-        # for loop
-        if cur.type == TT.FOR:
-            return self.parse_for()
-
-        # while loop
-        if cur.type == TT.WHILE:
-            return self.parse_while()
-
-        # do-while
-        if cur.type == TT.DO:
-            return self.parse_do_while()
-
-        # printf
-        if cur.type == TT.PRINTF:
-            return self.parse_printf()
-
-        # return
-        if cur.type == TT.RETURN:
-            return self.parse_return()
-
-        # ID-starting statements: assignment, array assignment, function call
+        # ID-starting statements: assignment, compound assign, array assign, function call
         if cur.type == TT.ID:
             return self.parse_id_statement()
 
@@ -135,12 +124,12 @@ class Parser:
 
     # ── Declaration (var or array) ────────────────────────────────────────────
     def parse_declaration(self):
-        type_    = self.expect_type()
-        name     = self.expect(TT.ID).value
+        type_ = self.expect_type()
+        name  = self.expect(TT.ID).value
 
-        # 2D array:  int m[3][3];
-        if self.match(TT.LBRACK) and self.peek(2).type == TT.RBRACK and \
-           self.peek(3).type == TT.LBRACK:
+        # ── Bug 2 Fix: use _is_2d_array() instead of fragile peek offsets ──
+        if self.match(TT.LBRACK) and self._is_2d_array():
+            # 2D array:  int m[rows][cols];
             self.advance()                          # [
             rows = self.expect(TT.INT_LIT).value
             self.expect(TT.RBRACK)                  # ]
@@ -150,7 +139,7 @@ class Parser:
             self.expect(TT.SEMI)
             return ArrayDecl2DNode(type_, name, rows, cols)
 
-        # 1D array with size:  int arr[5];
+        # 1D array with size:  int arr[5];   OR  int arr[] = {...};
         if self.match(TT.LBRACK):
             self.advance()   # [
             size = None
@@ -179,13 +168,39 @@ class Parser:
         self.expect(TT.SEMI)
         return VarDeclNode(type_, name, initializer)
 
+    def _is_2d_array(self):
+        """
+        Bug 2 Fix: Scan ahead to determine if this is a 2D array declaration.
+        We are currently sitting on '['. A 2D array looks like [INT_LIT][INT_LIT].
+        We scan forward past the first bracket group and check if another '[' follows.
+        This correctly handles any expression inside the first bracket.
+        """
+        depth = 0
+        i = self.pos
+        while i < len(self.tokens):
+            tt = self.tokens[i].type
+            if tt == TT.LBRACK:
+                depth += 1
+            elif tt == TT.RBRACK:
+                depth -= 1
+                if depth == 0:
+                    # Check if the very next token is another '['
+                    next_i = i + 1
+                    if next_i < len(self.tokens) and self.tokens[next_i].type == TT.LBRACK:
+                        return True
+                    return False
+            elif tt == TT.EOF:
+                return False
+            i += 1
+        return False
+
     # ── ID-starting statements ────────────────────────────────────────────────
     def parse_id_statement(self):
         name = self.expect(TT.ID).value
 
-        # 2D array assignment:  m[i][j] = expr;
-        if self.match(TT.LBRACK) and self.peek(2).type == TT.RBRACK \
-                and self.peek(3).type == TT.LBRACK:
+        # ── Bug 2 Fix: use _is_2d_array() for assignment too ──
+        if self.match(TT.LBRACK) and self._is_2d_array():
+            # 2D array assignment:  m[expr][expr] = expr;
             self.advance()
             row = self.parse_expression()
             self.expect(TT.RBRACK)
@@ -216,6 +231,14 @@ class Parser:
             self.expect(TT.RPAREN)
             self.expect(TT.SEMI)
             return FuncCallStmtNode(name, args)
+
+        # ── Bug 5 Fix: compound assignment operators as statements ──
+        COMPOUND_OPS = {TT.PLUSEQ, TT.MINUSEQ, TT.STAREQ, TT.SLASHEQ, TT.MODEQ}
+        if self.current().type in COMPOUND_OPS:
+            op = self.advance().value
+            value = self.parse_expression()
+            self.expect(TT.SEMI)
+            return CompoundAssignNode(name, op, value)
 
         # Simple assignment:  x = expr;
         self.expect(TT.ASSIGN)
@@ -279,24 +302,11 @@ class Parser:
         name = self.expect(TT.ID).value
         op   = self.current().type
 
-        if op == TT.INC:
-            self.advance()
-            return UpdateNode(name, '++')
-        if op == TT.DEC:
-            self.advance()
-            return UpdateNode(name, '--')
-        if op == TT.PLUSEQ:
-            self.advance()
-            val = self.parse_expression()
-            return UpdateNode(name, '+=', val)
-        if op == TT.MINUSEQ:
-            self.advance()
-            val = self.parse_expression()
-            return UpdateNode(name, '-=', val)
-        if op == TT.ASSIGN:
-            self.advance()
-            val = self.parse_expression()
-            return UpdateNode(name, '=', val)
+        if op == TT.INC:     self.advance(); return UpdateNode(name, '++')
+        if op == TT.DEC:     self.advance(); return UpdateNode(name, '--')
+        if op == TT.PLUSEQ:  self.advance(); return UpdateNode(name, '+=', self.parse_expression())
+        if op == TT.MINUSEQ: self.advance(); return UpdateNode(name, '-=', self.parse_expression())
+        if op == TT.ASSIGN:  self.advance(); return UpdateNode(name, '=',  self.parse_expression())
 
         raise SyntaxError(f'[Parser] Bad for-update at {self.current().value!r}')
 
@@ -320,6 +330,59 @@ class Parser:
         self.expect(TT.SEMI)
         return DoWhileNode(body, cond)
 
+    # ── break ─────────────────────────────────────────────────────────────────
+    def parse_break(self):
+        self.expect(TT.BREAK)
+        self.expect(TT.SEMI)
+        return BreakNode()
+
+    # ── continue ──────────────────────────────────────────────────────────────
+    def parse_continue(self):
+        self.expect(TT.CONTINUE)
+        self.expect(TT.SEMI)
+        return ContinueNode()
+
+    # ── switch / case / default ───────────────────────────────────────────────
+    def parse_switch(self):
+        self.expect(TT.SWITCH)
+        self.expect(TT.LPAREN)
+        expr = self.parse_expression()
+        self.expect(TT.RPAREN)
+        self.expect(TT.LBRACE)
+
+        cases = []
+        while not self.match(TT.RBRACE) and not self.match(TT.EOF):
+            if self.match(TT.CASE):
+                cases.append(self.parse_case())
+            elif self.match(TT.DEFAULT):
+                cases.append(self.parse_default())
+            else:
+                raise SyntaxError(
+                    f'[Parser] Line {self.current().line}: Expected case/default in switch, got {self.current().value!r}'
+                )
+
+        self.expect(TT.RBRACE)
+        return SwitchNode(expr, cases)
+
+    def parse_case(self):
+        self.expect(TT.CASE)
+        value = self.parse_primary()   # int or char literal
+        self.expect(TT.COLON)
+        stmts = []
+        while not self.match(TT.CASE) and not self.match(TT.DEFAULT) \
+                and not self.match(TT.RBRACE) and not self.match(TT.EOF):
+            stmts.append(self.parse_statement())
+        return CaseNode(value, stmts)
+
+    def parse_default(self):
+        self.expect(TT.DEFAULT)
+        self.expect(TT.COLON)
+        stmts = []
+        while not self.match(TT.CASE) and not self.match(TT.DEFAULT) \
+                and not self.match(TT.RBRACE) and not self.match(TT.EOF):
+            stmts.append(self.parse_statement())
+        return DefaultCaseNode(stmts)
+
     # ── printf ────────────────────────────────────────────────────────────────
     def parse_printf(self):
         self.expect(TT.PRINTF)
@@ -332,6 +395,23 @@ class Parser:
         self.expect(TT.RPAREN)
         self.expect(TT.SEMI)
         return PrintNode(fmt, args)
+
+    # ── scanf ─────────────────────────────────────────────────────────────────
+    def parse_scanf(self):
+        self.expect(TT.SCANF)
+        self.expect(TT.LPAREN)
+        fmt = self.expect(TT.STRING).value
+        vars_ = []
+        while self.match(TT.COMMA):
+            self.advance()
+            # Strip the & address-of operator
+            if self.match(TT.BITAND):
+                self.advance()
+            var_name = self.expect(TT.ID).value
+            vars_.append(var_name)
+        self.expect(TT.RPAREN)
+        self.expect(TT.SEMI)
+        return ScanfNode(fmt, vars_)
 
     # ── return ────────────────────────────────────────────────────────────────
     def parse_return(self):
@@ -351,10 +431,22 @@ class Parser:
         return args
 
     # ── Expressions (with operator precedence) ────────────────────────────────
-    # Precedence (low → high):  || → && → == != → < > <= >= → + - → * / % → unary → primary
+    # Precedence (low → high):
+    #   ternary → || → && → | → ^ → & → == != → < > <= >= → << >> → + - → * / % → unary → primary
 
     def parse_expression(self):
-        return self.parse_or()
+        return self.parse_ternary()
+
+    def parse_ternary(self):
+        """Ternary operator:  cond ? then : else"""
+        expr = self.parse_or()
+        if self.match(TT.QUESTION):
+            self.advance()
+            then_expr = self.parse_expression()
+            self.expect(TT.COLON)
+            else_expr = self.parse_expression()
+            return TernaryNode(expr, then_expr, else_expr)
+        return expr
 
     def parse_or(self):
         left = self.parse_and()
@@ -365,8 +457,32 @@ class Parser:
         return left
 
     def parse_and(self):
-        left = self.parse_equality()
+        left = self.parse_bitor()
         while self.match(TT.AND):
+            op = self.advance().value
+            right = self.parse_bitor()
+            left = BinOpNode(left, op, right)
+        return left
+
+    def parse_bitor(self):
+        left = self.parse_bitxor()
+        while self.match(TT.BITOR):
+            op = self.advance().value
+            right = self.parse_bitxor()
+            left = BinOpNode(left, op, right)
+        return left
+
+    def parse_bitxor(self):
+        left = self.parse_bitand()
+        while self.match(TT.BITXOR):
+            op = self.advance().value
+            right = self.parse_bitand()
+            left = BinOpNode(left, op, right)
+        return left
+
+    def parse_bitand(self):
+        left = self.parse_equality()
+        while self.match(TT.BITAND):
             op = self.advance().value
             right = self.parse_equality()
             left = BinOpNode(left, op, right)
@@ -381,8 +497,16 @@ class Parser:
         return left
 
     def parse_relational(self):
-        left = self.parse_additive()
+        left = self.parse_shift()
         while self.match(TT.LT, TT.GT, TT.LTE, TT.GTE):
+            op = self.advance().value
+            right = self.parse_shift()
+            left = BinOpNode(left, op, right)
+        return left
+
+    def parse_shift(self):
+        left = self.parse_additive()
+        while self.match(TT.LSHIFT, TT.RSHIFT):
             op = self.advance().value
             right = self.parse_additive()
             left = BinOpNode(left, op, right)
@@ -411,30 +535,18 @@ class Parser:
         if self.match(TT.MINUS):
             op = self.advance().value
             return UnaryOpNode(op, self.parse_unary())
+        if self.match(TT.BITNOT):
+            op = self.advance().value
+            return UnaryOpNode(op, self.parse_unary())
         return self.parse_primary()
 
     def parse_primary(self):
         tok = self.current()
 
-        # Integer literal
-        if tok.type == TT.INT_LIT:
-            self.advance()
-            return IntLiteralNode(tok.value)
-
-        # Float literal
-        if tok.type == TT.FLOAT_LIT:
-            self.advance()
-            return FloatLiteralNode(tok.value)
-
-        # Char literal
-        if tok.type == TT.CHAR_LIT:
-            self.advance()
-            return CharLiteralNode(tok.value)
-
-        # String literal
-        if tok.type == TT.STRING:
-            self.advance()
-            return StringLiteralNode(tok.value)
+        if tok.type == TT.INT_LIT:   self.advance(); return IntLiteralNode(tok.value)
+        if tok.type == TT.FLOAT_LIT: self.advance(); return FloatLiteralNode(tok.value)
+        if tok.type == TT.CHAR_LIT:  self.advance(); return CharLiteralNode(tok.value)
+        if tok.type == TT.STRING:    self.advance(); return StringLiteralNode(tok.value)
 
         # Parenthesised expression
         if tok.type == TT.LPAREN:
@@ -447,9 +559,9 @@ class Parser:
         if tok.type == TT.ID:
             name = self.advance().value
 
-            # 2D array access:  m[i][j]
-            if self.match(TT.LBRACK) and self.peek(2).type == TT.RBRACK \
-                    and self.peek(3).type == TT.LBRACK:
+            # ── Bug 2 Fix: use _is_2d_array() ──
+            if self.match(TT.LBRACK) and self._is_2d_array():
+                # 2D array access:  m[expr][expr]
                 self.advance()
                 row = self.parse_expression()
                 self.expect(TT.RBRACK)

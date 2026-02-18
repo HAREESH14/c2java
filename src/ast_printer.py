@@ -55,6 +55,8 @@ class ASTPrinter:
             return f'ArrayDecl2DNode  {node.type_}[][] {node.name}[{node.rows}][{node.cols}]'
         if isinstance(node, AssignNode):
             return f'AssignNode  {node.name} ='
+        if isinstance(node, CompoundAssignNode):
+            return f'CompoundAssignNode  {node.name} {node.op}'
         if isinstance(node, ArrayAssignNode):
             return f'ArrayAssignNode  {node.name}[i] ='
         if isinstance(node, ArrayAssign2DNode):
@@ -67,8 +69,20 @@ class ASTPrinter:
             return 'WhileNode'
         if isinstance(node, DoWhileNode):
             return 'DoWhileNode'
+        if isinstance(node, BreakNode):
+            return 'BreakNode'
+        if isinstance(node, ContinueNode):
+            return 'ContinueNode'
+        if isinstance(node, SwitchNode):
+            return f'SwitchNode  ({len(node.cases)} cases)'
+        if isinstance(node, CaseNode):
+            return f'CaseNode  case {self._label(node.value)}:'
+        if isinstance(node, DefaultCaseNode):
+            return f'DefaultCaseNode  default:'
         if isinstance(node, PrintNode):
             return f'PrintNode  printf({node.format_str})'
+        if isinstance(node, ScanfNode):
+            return f'ScanfNode  scanf({node.format_str})'
         if isinstance(node, ReturnNode):
             return 'ReturnNode'
         if isinstance(node, FuncCallStmtNode):
@@ -77,6 +91,8 @@ class ASTPrinter:
             return f'BinOpNode  [{node.op}]'
         if isinstance(node, UnaryOpNode):
             return f'UnaryOpNode  [{node.op}]'
+        if isinstance(node, TernaryNode):
+            return 'TernaryNode  [? :]'
         if isinstance(node, ArrayAccessNode):
             return f'ArrayAccessNode  {node.name}[i]'
         if isinstance(node, ArrayAccess2DNode):
@@ -108,6 +124,8 @@ class ASTPrinter:
             return node.init_values or []
         if isinstance(node, AssignNode):
             return [node.value]
+        if isinstance(node, CompoundAssignNode):
+            return [node.value]
         if isinstance(node, ArrayAssignNode):
             return [node.index, node.value]
         if isinstance(node, ArrayAssign2DNode):
@@ -125,8 +143,16 @@ class ASTPrinter:
             return [node.condition, node.body]
         if isinstance(node, DoWhileNode):
             return [node.body, node.condition]
+        if isinstance(node, SwitchNode):
+            return [node.expr] + node.cases
+        if isinstance(node, CaseNode):
+            return node.statements
+        if isinstance(node, DefaultCaseNode):
+            return node.statements
         if isinstance(node, PrintNode):
             return node.args
+        if isinstance(node, ScanfNode):
+            return []
         if isinstance(node, ReturnNode):
             return [node.value] if node.value else []
         if isinstance(node, FuncCallStmtNode):
@@ -135,6 +161,8 @@ class ASTPrinter:
             return [node.left, node.right]
         if isinstance(node, UnaryOpNode):
             return [node.operand]
+        if isinstance(node, TernaryNode):
+            return [node.condition, node.then_expr, node.else_expr]
         if isinstance(node, ArrayAccessNode):
             return [node.index]
         if isinstance(node, ArrayAccess2DNode):

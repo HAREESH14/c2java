@@ -83,6 +83,14 @@ class AssignNode(ASTNode):
         self.value = value   # expr ASTNode
 
 
+class CompoundAssignNode(ASTNode):
+    """Compound assignment.  x += expr;  x -= expr;  x *= expr;  x /= expr;"""
+    def __init__(self, name, op, value):
+        self.name  = name    # str
+        self.op    = op      # str: '+=', '-=', '*=', '/=', '%='
+        self.value = value   # expr ASTNode
+
+
 class ArrayAssignNode(ASTNode):
     """1D array element assignment.  arr[i] = expr;"""
     def __init__(self, name, index, value):
@@ -139,11 +147,48 @@ class DoWhileNode(ASTNode):
         self.condition = condition
 
 
+class BreakNode(ASTNode):
+    """break;"""
+    pass
+
+
+class ContinueNode(ASTNode):
+    """continue;"""
+    pass
+
+
+class SwitchNode(ASTNode):
+    """switch (expr) { case ...: ... default: ... }"""
+    def __init__(self, expr, cases):
+        self.expr  = expr    # expr ASTNode
+        self.cases = cases   # list of CaseNode / DefaultCaseNode
+
+
+class CaseNode(ASTNode):
+    """case value: statements"""
+    def __init__(self, value, statements):
+        self.value      = value       # IntLiteralNode or CharLiteralNode
+        self.statements = statements  # list of ASTNode
+
+
+class DefaultCaseNode(ASTNode):
+    """default: statements"""
+    def __init__(self, statements):
+        self.statements = statements  # list of ASTNode
+
+
 class PrintNode(ASTNode):
     """printf("format", args...)"""
     def __init__(self, format_str, args):
         self.format_str = format_str   # str (with quotes)
         self.args       = args         # list of expr ASTNodes
+
+
+class ScanfNode(ASTNode):
+    """scanf("%d", &x)  — the & is stripped, vars holds variable names."""
+    def __init__(self, format_str, vars_):
+        self.format_str = format_str   # str (with quotes)
+        self.vars_      = vars_        # list of str (variable names, & stripped)
 
 
 class ReturnNode(ASTNode):
@@ -160,16 +205,24 @@ class FuncCallStmtNode(ASTNode):
 
 
 # ── Expressions ───────────────────────────────────────────────────────────────
+class TernaryNode(ASTNode):
+    """Ternary expression.  condition ? then_expr : else_expr"""
+    def __init__(self, condition, then_expr, else_expr):
+        self.condition = condition
+        self.then_expr = then_expr
+        self.else_expr = else_expr
+
+
 class BinOpNode(ASTNode):
     """Binary operation.  left OP right"""
     def __init__(self, left, op, right):
         self.left  = left
-        self.op    = op     # str: '+', '-', '==', '<', '&&', etc.
+        self.op    = op     # str: '+', '-', '==', '<', '&&', '&', '|', etc.
         self.right = right
 
 
 class UnaryOpNode(ASTNode):
-    """Unary operation.  !expr"""
+    """Unary operation.  !expr  OR  -expr  OR  ~expr"""
     def __init__(self, op, operand):
         self.op      = op
         self.operand = operand
