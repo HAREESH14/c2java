@@ -1,0 +1,64 @@
+============================================================
+  C -> Java (10 programs)
+============================================================
+  PASS   hello_world
+  PASS   factorial
+  PASS   fibonacci
+  PASS   arrays
+  PASS   strings
+  FAIL   pointers
+  FAIL   struct
+  PASS   switch_case
+  PASS   while_loop
+  PASS   math_ops
+
+============================================================
+  C -> C++ (10 programs)
+============================================================
+  PASS   hello_world
+  PASS   factorial
+  PASS   fibonacci
+  PASS   arrays
+  PASS   strings
+  FAIL   pointers
+  FAIL   struct
+  PASS   switch_case
+  PASS   while_loop
+  PASS   math_ops
+
+============================================================
+  Java -> C (10 programs)
+============================================================
+  PASS   hello_java
+  PASS   factorial_java
+  PASS   fibonacci_java
+  FAIL   arrays_java
+  FAIL   strings_java
+  PASS   if_else_java
+  PASS   while_java
+  PASS   switch_java
+  PASS   for_loop_java
+  FAIL   math_java
+
+============================================================
+  C++ -> C (10 programs)
+============================================================
+  PASS   hello_cpp
+  PASS   class_basic
+  PASS   string_ops
+  PASS   new_delete
+  PASS   bool_cpp
+  PASS   auto_cpp
+  PASS   nullptr_cpp
+  PASS   static_cast_cpp
+  PASS   for_loop_cpp
+  FAIL   enum_cpp
+
+============================================================
+  ACCURACY SUMMARY
+============================================================
+  C->Java   : 8/10 (80%)
+  C->C++    : 8/10 (80%)
+  Java->C   : 7/10 (70%)
+  C++->C    : 9/10 (90%)
+  OVERALL   : 32/40 (80%)
