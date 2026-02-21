@@ -1,174 +1,87 @@
-# C → Java Translator (Pure Python)
-### Academic / Research Project — No external libraries needed
+# C ↔ Java Translator
 
----
+A bidirectional source-code translator between C and Java, built with:
 
-## How to Run
-
-```bash
-# Basic translation
-python3 src/main.py test/test1_variables_ifelse.c
-
-# Show the AST tree (great for report!)
-python3 src/main.py test/test4_functions.c --ast
-
-# Show all tokens from the lexer
-python3 src/main.py test/test2_loops.c --tokens
-
-# Run built-in demo (no file needed)
-python3 src/main.py
-
-# Show everything
-python3 src/main.py test/test3_arrays.c --ast --tokens
-```
-
-Output is saved to `Main.java` automatically.
-
----
+- **[javalang](https://github.com/c2jai/javalang)** — Java parser (AST)
+- **[pycparser](https://github.com/eliben/pycparser)** — C parser (AST)
 
 ## Project Structure
 
 ```
-c2java_python/
-│
+translator/
 ├── src/
-│   ├── main.py          ← Entry point — runs the full pipeline
-│   ├── lexer.py         ← Tokenizer (Lexer)
-│   ├── parser.py        ← Recursive Descent Parser → builds AST
-│   ├── ast_nodes.py     ← All AST node classes (data structures)
-│   ├── visitor.py       ← CToJavaVisitor — 22 translation rules
-│   └── ast_printer.py   ← Prints AST as a tree (for reports)
-│
-├── test/
-│   ├── test1_variables_ifelse.c
-│   ├── test2_loops.c
-│   ├── test3_arrays.c
-│   └── test4_functions.c
-│
-└── README.md
+│   ├── main.py        CLI entry point (auto-detects .java or .c)
+│   ├── java_to_c.py   Java → C  (javalang AST + pycparser C backend)
+│   ├── c_to_java.py   C → Java  (pycparser AST + string emitter)
+│   └── verify.py      WSL gcc compilation check
+├── tests/
+│   ├── test_java_to_c.py   (8 tests)
+│   └── test_c_to_java.py   (9 tests)
+├── samples/
+│   ├── fibonacci.java
+│   └── calculator.c
+└── pyproject.toml     (uv project)
 ```
 
----
+## Usage
 
-## Pipeline
+```bash
+cd translator
 
-```
-C Source (.c file)
-       │
-       ▼
-  lexer.py          ← Reads characters → produces Token list
-  (Lexer)               e.g. [Token(int), Token(ID,'x'), Token(=), ...]
-       │
-       ▼
-  parser.py         ← Reads tokens → builds AST
-  (Parser)              Recursive Descent — one method per grammar rule
-       │
-       ▼
-  AST               ← Tree of ASTNode objects
-  (ast_nodes.py)        e.g. ProgramNode → FunctionNode → BlockNode → ...
-       │
-       ▼
-  visitor.py        ← Walks AST node by node → emits Java strings
-  (Visitor)             visit_VarDeclNode(), visit_ForNode(), etc.
-       │
-       ▼
-  Main.java         ← Semantically equivalent Java program
+# Java -> C (with WSL gcc compile check)
+uv run python src/main.py samples/fibonacci.java --verify
+
+# C -> Java
+uv run python src/main.py samples/calculator.c
+
+# Show AST while translating
+uv run python src/main.py input.java --ast
+
+# Built-in demo (both directions)
+uv run python src/main.py --demo
+
+# Run all 17 tests
+uv run pytest tests/ -v
 ```
 
----
+## Supported Translations
 
-## 22 Translation Rules
+### Java → C
 
-| Rule | C | Java |
-|------|---|------|
-| R1  | Program | `public class Main { }` |
-| R2  | `int add(int a, int b)` | `public static int add(int a, int b)` |
-| R3  | `int main()` | `public static void main(String[] args)` |
-| R4  | `int x = 5;` | `int x = 5;` |
-| R5  | `int arr[5];` | `int[] arr = new int[5];` |
-| R6  | `int arr[] = {1,2,3};` | `int[] arr = {1, 2, 3};` |
-| R7  | `int m[3][3];` | `int[][] m = new int[3][3];` |
-| R8  | `arr[i]` | `arr[i]` |
-| R9  | `m[i][j]` | `m[i][j]` |
-| R10 | `x = expr;` | `x = expr;` |
-| R11 | `arr[i] = expr;` | `arr[i] = expr;` |
-| R12 | `m[i][j] = expr;` | `m[i][j] = expr;` |
-| R13 | `if/else if/else` | `if/else if/else` |
-| R14 | `for (init;cond;upd)` | `for (init;cond;upd)` |
-| R15 | `while (cond)` | `while (cond)` |
-| R16 | `do {} while (cond);` | `do {} while (cond);` |
-| R17a| `printf("text\n")` | `System.out.println("text")` |
-| R17b| `printf("%d", x)` | `System.out.println(x)` |
-| R17c| `printf("v=%d\n", x)` | `System.out.printf("v=%d%n", x)` |
-| R18 | `return 0;` (main) | `return;` |
-| R19 | `myFunc(a, b);` | `myFunc(a, b);` |
-| R20 | `+, -, *, /, %, ==, !=, <, >, <=, >=, &&, \|\|` | same |
-| R21 | `!expr` | `!expr` |
-| R22 | `int/float/double/char/void` | same |
+| Feature                          | Example                                                      |
+| -------------------------------- | ------------------------------------------------------------ |
+| Primitive types                  | `int`, `float`, `double`, `char`, `boolean`, `long`, `short` |
+| Variables & arrays (1D/2D)       | `int[] a = new int[5];` → `int a[5];`                        |
+| if / else if / else              | ✅                                                           |
+| for / while / do-while           | ✅                                                           |
+| for-each                         | `for (int x : arr)` → C index loop                           |
+| break / continue                 | ✅                                                           |
+| switch / case / default          | ✅                                                           |
+| Functions + forward declarations | ✅                                                           |
+| Compound assignments             | `x += 5; x *= 2;` ✅                                         |
+| `System.out.println` / `printf`  | → `printf(...)`                                              |
+| `String.equals()` / `.length()`  | → `strcmp` / `strlen`                                        |
+| `HashMap<K,V>`                   | → struct simulation                                          |
+| Ternary `? :`                    | ✅                                                           |
 
----
+### C → Java
 
-## Key Files Explained
+| Feature                     | Example                                 |
+| --------------------------- | --------------------------------------- |
+| Functions                   | → `public static` methods               |
+| Arrays                      | `int arr[5]` → `int[] arr = new int[5]` |
+| `printf`                    | → `System.out.printf`                   |
+| `scanf`                     | → `Scanner sc.nextInt()` etc.           |
+| `Math.*`                    | `sqrt`, `pow`, `sin`, `cos`…            |
+| `strlen` / `strcmp`         | → `s.length()` / `s.compareTo()`        |
+| `Integer.parseInt` / `atoi` | ✅                                      |
+| switch / case / default     | ✅                                      |
+| break / continue            | ✅                                      |
 
-### `lexer.py` — Tokenizer
-Reads C source character by character and produces tokens.
+## Test Results
+
 ```
-"int x = 5;"  →  [Token(int), Token(ID,'x'), Token(=), Token(INT_LIT,'5'), Token(;)]
-```
-
-### `ast_nodes.py` — AST Data Structures
-Plain Python classes, one per grammar construct:
-```python
-class ForNode(ASTNode):
-    def __init__(self, init, condition, update, body):
-        self.init      = init       # VarDeclNode or AssignNode
-        self.condition = condition  # expression
-        self.update    = update     # UpdateNode
-        self.body      = body       # BlockNode
+17 passed in 0.11s
 ```
 
-### `parser.py` — Recursive Descent Parser
-One `parse_xxx()` method per grammar rule:
-```python
-def parse_for(self):
-    self.expect('for')
-    self.expect('(')
-    init = self.parse_for_init()
-    ...
-    return ForNode(init, cond, update, body)
-```
-
-### `visitor.py` — Translation Rules
-One `visit_Xxx()` method per AST node type:
-```python
-def visit_ForNode(self, node):
-    return f'for ({init}; {cond}; {upd}) {body}'
-```
-
-### `ast_printer.py` — AST Display
-Prints the AST as a tree (use `--ast` flag):
-```
-ProgramNode
-└── FunctionNode  int main() [main]
-    └── BlockNode  (3 statements)
-        ├── VarDeclNode  int x
-        │   └── IntLiteral  5
-        ├── ForNode
-        │   ├── VarDeclNode  int i
-        ...
-```
-
----
-
-## Requirements
-
-- Python 3.6 or higher
-- No external packages needed
-
----
-
-## References
-
-- Dragon Book: Aho, Lam, Sethi, Ullman — "Compilers: Principles, Techniques, Tools"
-- "Engineering a Compiler" — Cooper & Torczon
-- Recursive Descent Parsing: https://en.wikipedia.org/wiki/Recursive_descent_parser
+WSL `gcc -Wall` compilation: **PASS** on all generated C files.

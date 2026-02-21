@@ -1,9 +1,11 @@
 [project]
-name = "java2c"
+name = "translator"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "javalang>=0.13.0",
     "pycparser>=3.0",
+    "pytest>=9.0.2",
 ]
