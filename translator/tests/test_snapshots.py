@@ -1,9 +1,6 @@
 # tests/test_snapshots.py
 # Snapshot tests: compare translator output against saved .expected files.
-# This catches regressions — if the output changes, the test fails.
-# To update expected files after intentional changes:
-#   uv run python -c "import sys; sys.path.insert(0,'src'); import java_to_c; \
-#     open('tests/expected/fibonacci_j2c.expected','w').write(java_to_c.translate_file('samples/fibonacci.java'))"
+# To update expected files: uv run python generate_expected.py
 import sys, os, pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -20,25 +17,38 @@ def _read(path):
         return f.read()
 
 
-def test_fibonacci_java_to_c_snapshot():
-    """fibonacci.java -> C  must match saved expected output."""
-    actual   = java_to_c.translate_file(os.path.join(SAMPLES_DIR, 'fibonacci.java'))
-    expected = _read(os.path.join(EXPECTED_DIR, 'fibonacci_j2c.expected'))
+def _check(actual, expected_file):
+    expected = _read(os.path.join(EXPECTED_DIR, expected_file))
     assert actual == expected, (
-        "Java->C output changed! If intentional, update the .expected file.\n"
-        f"Run: uv run python -c \"import sys; sys.path.insert(0,'src'); "
-        f"import java_to_c; open('tests/expected/fibonacci_j2c.expected','w',"
-        f"encoding='utf-8').write(java_to_c.translate_file('samples/fibonacci.java'))\""
+        f"Output changed vs {expected_file}! "
+        f"If intentional, run: uv run python generate_expected.py"
     )
 
 
-def test_calculator_c_to_java_snapshot():
-    """calculator.c -> Java  must match saved expected output."""
-    actual   = c_to_java.translate_file(os.path.join(SAMPLES_DIR, 'calculator.c'))
-    expected = _read(os.path.join(EXPECTED_DIR, 'calculator_c2j.expected'))
-    assert actual == expected, (
-        "C->Java output changed! If intentional, update the .expected file.\n"
-        f"Run: uv run python -c \"import sys; sys.path.insert(0,'src'); "
-        f"import c_to_java; open('tests/expected/calculator_c2j.expected','w',"
-        f"encoding='utf-8').write(c_to_java.translate_file('samples/calculator.c'))\""
-    )
+# ── Java -> C snapshots ──────────────────────────────────────────────────────
+
+def test_fibonacci_j2c_snapshot():
+    actual = java_to_c.translate_file(os.path.join(SAMPLES_DIR, 'fibonacci.java'))
+    _check(actual, 'fibonacci_j2c.expected')
+
+
+def test_all_features_j2c_snapshot():
+    actual = java_to_c.translate_file(os.path.join(SAMPLES_DIR, 'all_features.java'))
+    _check(actual, 'all_features_j2c.expected')
+
+
+def test_hashmap_strings_j2c_snapshot():
+    actual = java_to_c.translate_file(os.path.join(SAMPLES_DIR, 'hashmap_strings.java'))
+    _check(actual, 'hashmap_strings_j2c.expected')
+
+
+# ── C -> Java snapshots ──────────────────────────────────────────────────────
+
+def test_calculator_c2j_snapshot():
+    actual = c_to_java.translate_file(os.path.join(SAMPLES_DIR, 'calculator.c'))
+    _check(actual, 'calculator_c2j.expected')
+
+
+def test_all_features_c2j_snapshot():
+    actual = c_to_java.translate_file(os.path.join(SAMPLES_DIR, 'all_features.c'))
+    _check(actual, 'all_features_c2j.expected')

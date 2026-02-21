@@ -1,0 +1,182 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+int max(int a, int b);
+float average(int a, int b);
+void printRange(int start, int end);
+int isEven(int n);
+
+int max(int a, int b)
+{
+  return (a > b ? a : b);
+}
+
+
+
+float average(int a, int b)
+{
+  return (a + b) / 2.0;
+}
+
+
+
+void printRange(int start, int end)
+{
+  for (int i = start; i < end; i++)
+  {
+    printf("%d\n", i);
+  }
+
+}
+
+
+
+int isEven(int n)
+{
+  return (n % 2) == 0;
+}
+
+
+
+int main()
+{
+  int x = 42;
+  float pi = 3.14;
+  double e = 2.718;
+  char ch = 'Z';
+  long big = 999999;
+  short small = 10;
+  x += 8;
+  x -= 10;
+  x *= 2;
+  x /= 4;
+  printf("x = %d\n", x);
+  int a = 5;
+  a++;
+  ++a;
+  a--;
+  --a;
+  printf("a = %d\n", a);
+  if (x > 100)
+  {
+    printf("big\n");
+  }
+  else
+    if (x > 50)
+  {
+    printf("medium\n");
+  }
+  else
+    if (x > 10)
+  {
+    printf("small\n");
+  }
+  else
+  {
+    printf("tiny\n");
+  }
+  int sum = 0;
+  for (int i = 1; i <= 10; i++)
+  {
+    sum += i;
+  }
+
+  printf("sum = %d\n", sum);
+  int count = 0;
+  while (count < 5)
+  {
+    count++;
+  }
+
+  printf("count = %d\n", count);
+  int n = 10;
+  do
+  {
+    n -= 3;
+  }
+  while (n > 0);
+  printf("n = %d\n", n);
+  for (int i = 0; i < 20; i++)
+  {
+    if ((i % 2) == 0)
+    {
+      continue;
+    }
+    if (i > 9)
+    {
+      break;
+    }
+    printf("%d\n", i);
+  }
+
+  int arr[5];
+  for (int i = 0; i < 5; i++)
+  {
+    arr[i] = i * i;
+  }
+
+  int fib[] = {1, 1, 2, 3, 5, 8, 13};
+  int grid[3][4];
+  for (int i = 0; i < 3; i++)
+  {
+    for (int j = 0; j < 4; j++)
+    {
+      grid[i][j] = (i * 4) + j;
+    }
+
+  }
+
+  for (int _fi1 = 0; _fi1 < (sizeof(fib) / sizeof(fib[0])); _fi1++)
+  {
+    int f = fib[_fi1];
+    printf("%d\n", f);
+  }
+
+  int day = 5;
+  switch (day)
+  {
+    case 1:
+      printf("Mon\n");
+      break;
+
+    case 2:
+      printf("Tue\n");
+      break;
+
+    case 3:
+      printf("Wed\n");
+      break;
+
+    case 4:
+      printf("Thu\n");
+      break;
+
+    case 5:
+      printf("Fri\n");
+      break;
+
+    case 6:
+      printf("Sat\n");
+      break;
+
+    case 7:
+      printf("Sun\n");
+      break;
+
+    default:
+      printf("Invalid\n");
+      break;
+
+  }
+
+  int biggest = max(42, 17);
+  printf("max = %d\n", biggest);
+  printRange(0, 3);
+  int abs_val = (x > 0 ? x : -x);
+  printf("abs = %d\n", abs_val);
+  printf("Result: %d\n", biggest);
+  printf("pi = %f, ch = %c\n", pi, ch);
+  return 0;
+}
+
+

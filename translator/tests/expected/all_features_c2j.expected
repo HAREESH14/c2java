@@ -1,0 +1,116 @@
+import java.util.Scanner;
+
+import java.lang.Math;
+
+public class Main {
+
+    public static int factorial(int n) {
+        if ((n <= 1)) {
+            return 1;
+        }
+        return (n * factorial((n - 1)));
+    }
+
+    public static int max(int a, int b) {
+        return ((a > b) ? a : b);
+    }
+
+    public static float average(float a, float b) {
+        return ((a + b) / 2.0f);
+    }
+
+    public static void print_array(int[] arr, int size) {
+        int i;
+        for (i = 0; (i < size); i++) {
+            System.out.printf("%d ", arr[i]);
+        }
+        System.out.printf("%n");
+    }
+
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        int x = 10;
+        float pi = 3.14f;
+        double e = 2.718;
+        char ch = 'A';
+        long big = 999999;
+        short small_val = 5;
+        x += 5;
+        x -= 2;
+        x *= 3;
+        x /= 4;
+        System.out.printf("x = %d%n", x);
+        int a = 3;
+        a++;
+        ++a;
+        a--;
+        --a;
+        if ((x > 100)) {
+                System.out.printf("big%n");
+        } else if ((x > 10)) {
+                System.out.printf("medium%n");
+        } else {
+                System.out.printf("small%n");
+        }
+        int sum = 0;
+        int i;
+        for (i = 1; (i <= 10); i++) {
+            sum += i;
+        }
+        System.out.printf("sum = %d%n", sum);
+        int count = 0;
+        while ((count < 5)) {
+            count++;
+        }
+        int n = 10;
+        do {
+            n -= 3;
+        } while ((n > 0));
+        System.out.printf("n = %d%n", n);
+        for (i = 0; (i < 20); i++) {
+            if (((i % 2) == 0)) {
+                continue;
+            }
+            if ((i > 9)) {
+                break;
+            }
+            System.out.printf("%d%n", i);
+        }
+        int[] arr = {10, 20, 30, 40, 50};
+        int[] fib = {1, 1, 2, 3, 5, 8};
+        arr[0] = 99;
+        print_array(arr, 5);
+        print_array(fib, 6);
+        int day = 3;
+        switch (day) {
+            case 1:
+                System.out.printf("Mon%n");
+                break;
+            case 2:
+                System.out.printf("Tue%n");
+                break;
+            case 3:
+                System.out.printf("Wed%n");
+                break;
+            default:
+                System.out.printf("Other%n");
+                break;
+        }
+        int result = factorial(5);
+        System.out.printf("5! = %d%n", result);
+        System.out.printf("max = %d%n", max(42, 17));
+        String name = "Hello";
+        int len = name.length();
+        System.out.printf("len = %d%n", len);
+        double sq = Math.sqrt(16.0);
+        System.out.printf("sqrt(16) = %f%n", sq);
+        int abs_x = ((x > 0) ? x : -x);
+        System.out.printf("abs = %d%n", abs_x);
+        int user_input;
+        System.out.printf("Enter a number: ");
+        user_input = sc.nextInt();
+        System.out.printf("You entered: %d%n", user_input);
+        return;
+    }
+
+}

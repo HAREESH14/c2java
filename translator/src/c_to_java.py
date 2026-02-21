@@ -135,6 +135,10 @@ def _extract(decl):
     is_arr = False
     arr_sz = None
     if isinstance(dtype, c_ast.ArrayDecl):
+        # char[] -> String in Java (same as char*)
+        inner_type = _gtype(dtype.type)
+        if inner_type == 'char':
+            return ('String', name, False, None)
         is_arr = True
         arr_sz = ExprVisitor().visit(dtype.dim) if dtype.dim else None
         dtype  = dtype.type
