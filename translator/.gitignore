@@ -1,0 +1,17 @@
+# Generated output files
+*.c
+!samples/*.c
+*.java
+!samples/*.java
+*.out
+*.class
+
+# Temp / debug
+err.txt
+tmp_err.txt
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

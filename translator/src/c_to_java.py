@@ -356,7 +356,8 @@ class CToJavaVisitor(c_ast.NodeVisitor):
                 vn  = var.lstrip('&')
                 sp  = specs[idx] if idx<len(specs) else '%d'
                 if sp in ('%d','%i'):  self.emit(f'{vn} = sc.nextInt();')
-                elif sp in ('%f','%lf','%g'): self.emit(f'{vn} = sc.nextDouble();')
+                elif sp == '%f':              self.emit(f'{vn} = sc.nextFloat();')
+                elif sp in ('%lf','%g'):      self.emit(f'{vn} = sc.nextDouble();')
                 elif sp == '%s':       self.emit(f'{vn} = sc.next();')
                 elif sp == '%c':       self.emit(f'{vn} = sc.next().charAt(0);')
                 else:                  self.emit(f'{vn} = sc.nextLine();')

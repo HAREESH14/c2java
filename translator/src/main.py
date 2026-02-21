@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import java_to_c
 import c_to_java
-from verify import compile_c_wsl
+from verify import compile_c_wsl, compile_java_wsl
 
 
 BANNER = """\
@@ -121,7 +121,7 @@ def run_java_to_c(source: str, out_name: str,
             sys.exit(2)
 
 
-def run_c_to_java(path: str, out_name: str, show_ast: bool):
+def run_c_to_java(path: str, out_name: str, show_ast: bool, verify: bool = False):
     print(f'\n  Mode     : C -> Java')
     print(f'  Parser   : pycparser (C AST)')
     print(f'  Backend  : string emitter (Java)')
@@ -154,6 +154,14 @@ def run_c_to_java(path: str, out_name: str, show_ast: bool):
     with open(out_name, 'w', encoding='utf-8') as f:
         f.write(java_code)
     print(f'\n[OK] Saved -> {out_name}')
+
+    if verify:
+        print('\n[WSL javac] Compiling generated Java...')
+        ok, msg = compile_java_wsl(java_code)
+        status  = 'PASS' if ok else 'FAIL'
+        print(f'  javac [{status}]: {msg}')
+        if not ok:
+            sys.exit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +201,7 @@ def main():
 
     elif ext == '.c':
         print(f'Input: {path}')
-        run_c_to_java(path, stem + '.java', show_ast)
+        run_c_to_java(path, stem + '.java', show_ast, verify)
 
     else:
         print(f'[ERROR] Unsupported extension "{ext}". Use .java or .c')

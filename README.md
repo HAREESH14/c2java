@@ -13,10 +13,12 @@ translator/
 │   ├── main.py        CLI entry point (auto-detects .java or .c)
 │   ├── java_to_c.py   Java → C  (javalang AST + pycparser C backend)
 │   ├── c_to_java.py   C → Java  (pycparser AST + string emitter)
-│   └── verify.py      WSL gcc compilation check
+│   └── verify.py      WSL gcc + javac compilation checks
 ├── tests/
 │   ├── test_java_to_c.py   (8 tests)
-│   └── test_c_to_java.py   (9 tests)
+│   ├── test_c_to_java.py   (9 tests)
+│   ├── test_snapshots.py   (2 snapshot tests)
+│   └── expected/           (.expected output files)
 ├── samples/
 │   ├── fibonacci.java
 │   └── calculator.c
@@ -31,8 +33,8 @@ cd translator
 # Java -> C (with WSL gcc compile check)
 uv run python src/main.py samples/fibonacci.java --verify
 
-# C -> Java
-uv run python src/main.py samples/calculator.c
+# C -> Java (with WSL javac compile check)
+uv run python src/main.py samples/calculator.c --verify
 
 # Show AST while translating
 uv run python src/main.py input.java --ast
@@ -40,7 +42,7 @@ uv run python src/main.py input.java --ast
 # Built-in demo (both directions)
 uv run python src/main.py --demo
 
-# Run all 17 tests
+# Run all 19 tests
 uv run pytest tests/ -v
 ```
 
@@ -81,7 +83,11 @@ uv run pytest tests/ -v
 ## Test Results
 
 ```
-17 passed in 0.11s
+19 passed in 0.14s
 ```
 
-WSL `gcc -Wall` compilation: **PASS** on all generated C files.
+| Verification        | Tool            | Status   |
+| ------------------- | --------------- | -------- |
+| Java → C output     | WSL `gcc -Wall` | **PASS** |
+| C → Java output     | WSL `javac`     | **PASS** |
+| Snapshot regression | pytest diff     | **PASS** |
