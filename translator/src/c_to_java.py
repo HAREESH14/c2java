@@ -1,12 +1,19 @@
 # =============================================================================
-#  c_to_java.py  -- C -> Java translator
+#  c_to_java.py  -- C -> Java translator (enhanced)
 #
 #  Uses: pycparser (C AST)  ->  Java source strings
-#  Adapted from lib_translator/c_to_java.py with enhancements:
-#    + Switch/case support
-#    + Error recovery (unknown nodes emit /* unsupported */ comment)
-#    + Scanner/stdin support (scanf -> sc.nextInt etc.)
-#    + Math.*, Character.*, Integer.parseInt etc.
+#
+#  Supported features:
+#    All types + char[]/char* -> String, arrays (1D/2D), if/else, for, while,
+#    do-while, break, continue, switch/case, functions -> static methods,
+#    compound assign, prefix/postfix ++/--, ternary, cast,
+#    printf -> System.out.printf, scanf -> Scanner,
+#    strlen/strcmp/strcpy/strcat/strchr/strstr -> String methods,
+#    Math.* (sqrt/pow/sin/cos/tan/etc), Character.* (toupper/tolower/isXxx),
+#    atoi/atof/atol -> Integer.parseInt/Double.parseDouble/Long.parseLong,
+#    puts -> println, exit -> System.exit, sizeof -> constant or .length,
+#    NULL -> null, const -> final, struct -> class, enum -> enum,
+#    malloc/free -> new/comment, #define constants, unsigned types
 # =============================================================================
 
 import pycparser
@@ -14,7 +21,10 @@ from pycparser import c_ast
 
 TYPE_MAP = {
     'int':'int','float':'float','double':'double','char':'char',
-    'void':'void','long':'long','short':'short','unsigned':'int','bool':'boolean',
+    'void':'void','long':'long','short':'short','unsigned':'int',
+    'bool':'boolean','_Bool':'boolean',
+    'unsigned int':'int','unsigned char':'int','unsigned long':'long',
+    'unsigned short':'short','signed':'int','size_t':'int',
 }
 
 PRINTF_FUNCS = {'printf','fprintf'}
@@ -31,6 +41,7 @@ STRING_FUNC_1 = {
     'isspace': lambda a: f'Character.isWhitespace({a})',
     'isupper': lambda a: f'Character.isUpperCase({a})',
     'islower': lambda a: f'Character.isLowerCase({a})',
+    'isalnum': lambda a: f'Character.isLetterOrDigit({a})',
     'sqrt':    lambda a: f'Math.sqrt({a})',
     'abs':     lambda a: f'Math.abs({a})',
     'fabs':    lambda a: f'Math.abs({a})',
@@ -42,20 +53,27 @@ STRING_FUNC_1 = {
     'sin':     lambda a: f'Math.sin({a})',
     'cos':     lambda a: f'Math.cos({a})',
     'tan':     lambda a: f'Math.tan({a})',
+    'asin':    lambda a: f'Math.asin({a})',
+    'acos':    lambda a: f'Math.acos({a})',
+    'atan':    lambda a: f'Math.atan({a})',
+    'exp':     lambda a: f'Math.exp({a})',
     'rand':    lambda a: f'(int)(Math.random() * 32767)',
+    'puts':    lambda a: f'System.out.println({a})',
+    'free':    lambda a: f'/* free({a}) -- Java has GC */',
+    'getchar': lambda a: f'(char)System.in.read()',
 }
 STRING_FUNC_2 = {
-    'strcmp':  lambda a,b: f'{a}.compareTo({b})',
+    'strcmp':   lambda a,b: f'{a}.compareTo({b})',
+    'strncmp': lambda a,b: f'{a}.substring(0,{b}).compareTo',
     'strcat':  lambda a,b: f'{a} + {b}',
     'strchr':  lambda a,b: f'{a}.indexOf({b}) >= 0',
     'strstr':  lambda a,b: f'{a}.contains({b})',
     'pow':     lambda a,b: f'Math.pow({a}, {b})',
+    'fmax':    lambda a,b: f'Math.max({a}, {b})',
+    'fmin':    lambda a,b: f'Math.min({a}, {b})',
     'strcpy':  lambda a,b: f'{b}',   # simplified
-}
-PARSE_MAP = {
-    ('Integer','parseInt'):   'Integer.parseInt',
-    ('Double','parseDouble'): 'Double.parseDouble',
-    ('Long','parseLong'):     'Long.parseLong',
+    'strncpy': lambda a,b: f'{b}',   # simplified
+    'atan2':   lambda a,b: f'Math.atan2({a}, {b})',
 }
 
 def _jtype(ct): return TYPE_MAP.get(ct, ct)
@@ -71,9 +89,21 @@ class ExprVisitor(c_ast.NodeVisitor):
     def visit_Constant(self, n):
         v = n.value
         if n.type == 'float' and not v.endswith(('f','F')): v += 'f'
+        # Replace NULL/0 in pointer context
+        if v == 'NULL' or (n.type == 'int' and v == '0'):
+            pass  # keep as is, context-dependent
         return v
 
-    def visit_ID(self, n): return n.name
+    def visit_ID(self, n):
+        if n.name == 'NULL': return 'null'
+        if n.name == 'M_PI': return 'Math.PI'
+        if n.name == 'M_E': return 'Math.E'
+        if n.name == 'INT_MAX': return 'Integer.MAX_VALUE'
+        if n.name == 'INT_MIN': return 'Integer.MIN_VALUE'
+        if n.name == 'RAND_MAX': return '32767'
+        if n.name == 'EOF': return '-1'
+        if n.name == 'true' or n.name == 'false': return n.name
+        return n.name
 
     def visit_BinaryOp(self, n):
         return f'({self.visit(n.left)} {n.op} {self.visit(n.right)})'
@@ -83,6 +113,8 @@ class ExprVisitor(c_ast.NodeVisitor):
         if op=='p++': return f'{e}++'
         if op=='p--': return f'{e}--'
         if op in ('&','*'): return e       # address-of / deref -> strip
+        if op == 'sizeof':
+            return f'/* sizeof({e}) */ 4'
         return f'{op}{e}'
 
     def visit_Assignment(self, n):
@@ -91,6 +123,31 @@ class ExprVisitor(c_ast.NodeVisitor):
     def visit_FuncCall(self, n):
         name = n.name.name if isinstance(n.name,c_ast.ID) else self.visit(n.name)
         args = [self.visit(a) for a in (n.args.exprs if n.args else [])]
+
+        # Handle sizeof specially
+        if name == 'sizeof':
+            if args:
+                return f'/* sizeof */ 4'
+            return '4'
+
+        # Handle putchar
+        if name == 'putchar':
+            return f'System.out.print((char){args[0]})'
+
+        # Handle exit
+        if name == 'exit':
+            return f'System.exit({args[0] if args else "0"})'
+
+        # Handle malloc
+        if name == 'malloc' or name == 'calloc':
+            return f'new int[{args[0] if args else "10"}]'
+
+        # Handle sprintf/snprintf
+        if name in ('sprintf','snprintf'):
+            if len(args) >= 2:
+                return f'String.format({", ".join(args[1:])})'
+            return f'String.format({", ".join(args)})'
+
         if name in PRINTF_FUNCS:
             rest = args[1:]
             fmt  = args[0].replace('\\n','%n') if args else '""'
@@ -118,6 +175,12 @@ class ExprVisitor(c_ast.NodeVisitor):
     def visit_ExprList(self, n):
         return ', '.join(self.visit(e) for e in n.exprs)
 
+    def visit_Compound(self, n):
+        return '/* compound */'
+
+    def visit_Typename(self, n):
+        return _jtype(_gtype(n.type))
+
     def generic_visit(self, n):
         return f'/* expr:{type(n).__name__} */'
 
@@ -129,27 +192,50 @@ def _gtype(t):
         return _gtype(t.type)
     return 'void'
 
+def _is_const(decl):
+    """Check if a declaration has const qualifier."""
+    if hasattr(decl, 'quals') and decl.quals and 'const' in decl.quals:
+        return True
+    if hasattr(decl, 'type'):
+        t = decl.type
+        if hasattr(t, 'quals') and t.quals and 'const' in t.quals:
+            return True
+        if isinstance(t, c_ast.TypeDecl) and hasattr(t, 'quals') and t.quals and 'const' in t.quals:
+            return True
+    return False
+
 def _extract(decl):
     name   = decl.name
     dtype  = decl.type
     is_arr = False
     arr_sz = None
+    is_2d  = False
+    arr_sz2 = None
     if isinstance(dtype, c_ast.ArrayDecl):
+        # Check for 2D array: ArrayDecl(ArrayDecl(...))
+        if isinstance(dtype.type, c_ast.ArrayDecl):
+            is_2d = True
+            arr_sz  = ExprVisitor().visit(dtype.dim) if dtype.dim else None
+            arr_sz2 = ExprVisitor().visit(dtype.type.dim) if dtype.type.dim else None
+            inner_type = _gtype(dtype.type.type)
+            if inner_type == 'char':
+                return ('String', name, True, arr_sz, False, None)
+            return (_jtype(inner_type), name, True, arr_sz, True, arr_sz2)
         # char[] -> String in Java (same as char*)
         inner_type = _gtype(dtype.type)
         if inner_type == 'char':
-            return ('String', name, False, None)
+            return ('String', name, False, None, False, None)
         is_arr = True
         arr_sz = ExprVisitor().visit(dtype.dim) if dtype.dim else None
         dtype  = dtype.type
     elif isinstance(dtype, c_ast.PtrDecl):
         inner  = dtype.type
         ts     = _gtype(inner)
-        if ts == 'char': return ('String', name, False, None)
+        if ts == 'char': return ('String', name, False, None, False, None)
         is_arr = True
         dtype  = inner
     ts    = _gtype(dtype)
-    return (_jtype(ts), name, is_arr, arr_sz)
+    return (_jtype(ts), name, is_arr, arr_sz, is_2d, arr_sz2)
 
 def _uses_scanf(node):
     class F(c_ast.NodeVisitor):
@@ -178,22 +264,100 @@ class CToJavaVisitor(c_ast.NodeVisitor):
     # ── Top-level ─────────────────────────────────────────────────────────────
     def visit_FileAST(self, node):
         self.scanner = _uses_scanf(node)
-        needs_math  = any(f in str(node) for f in ('sqrt','pow','sin','cos','Math'))
-        needs_str   = any(f in str(node) for f in ('strlen','strcmp','strcpy'))
+        needs_math  = any(f in str(node) for f in ('sqrt','pow','sin','cos','Math','fabs','ceil','floor','log','exp'))
 
         if self.scanner:   self.emit('import java.util.Scanner;'); self.blank()
         if needs_math:     self.emit('import java.lang.Math;');    self.blank()
         self.emit('public class Main {'); self.blank()
         self.indent = 1
+
         for item in node.ext:
             if isinstance(item, c_ast.FuncDef):
                 self.visit_FuncDef(item); self.blank()
             elif isinstance(item, c_ast.Decl):
-                jt_, name, is_arr, sz = _extract(item)
-                if item.init: self.emit(f'static {jt_} {name} = {self._e(item.init)};')
-                else:         self.emit(f'static {jt_} {name};')
+                if isinstance(item.type, c_ast.Enum):
+                    self._enum_decl(item)
+                elif isinstance(item.type, c_ast.Struct):
+                    self._struct_decl(item)
+                elif isinstance(item.type, c_ast.FuncDecl):
+                    pass  # skip forward declarations
+                else:
+                    jt_, name, is_arr, sz, is_2d, sz2 = _extract(item)
+                    is_const = _is_const(item)
+                    prefix = 'static final' if is_const else 'static'
+                    if is_2d:
+                        if item.init:
+                            self.emit(f'{prefix} {jt_}[][] {name} = {self._e(item.init)};')
+                        elif sz and sz2:
+                            self.emit(f'{prefix} {jt_}[][] {name} = new {jt_}[{sz}][{sz2}];')
+                        else:
+                            self.emit(f'{prefix} {jt_}[][] {name};')
+                    elif is_arr:
+                        if item.init:
+                            self.emit(f'{prefix} {jt_}[] {name} = {self._e(item.init)};')
+                        elif sz:
+                            self.emit(f'{prefix} {jt_}[] {name} = new {jt_}[{sz}];')
+                        else:
+                            self.emit(f'{prefix} {jt_}[] {name};')
+                    else:
+                        if item.init:
+                            self.emit(f'{prefix} {jt_} {name} = {self._e(item.init)};')
+                        else:
+                            self.emit(f'{prefix} {jt_} {name};')
+            elif isinstance(item, c_ast.Typedef):
+                pass  # skip typedefs for now
+
         self.indent = 0
         self.emit('}')
+
+    # ── Enum ──────────────────────────────────────────────────────────────────
+    def _enum_decl(self, item):
+        enum = item.type
+        name = enum.name or item.name or 'AnEnum'
+        vals = []
+        if enum.values:
+            for ev in enum.values.enumerators:
+                if ev.value:
+                    vals.append(f'{ev.name} = {self._e(ev.value)}')
+                else:
+                    vals.append(ev.name)
+        # Java enum doesn't support = value directly, so we use constants
+        # For simple enums (no values), use real enum; otherwise use int constants
+        has_values = any('=' in v for v in vals)
+        if has_values:
+            for v in vals:
+                parts = v.split(' = ')
+                if len(parts) == 2:
+                    self.emit(f'static final int {parts[0].strip()} = {parts[1].strip()};')
+                else:
+                    self.emit(f'static final int {v.strip()};')
+        else:
+            # Clean enum
+            members = ', '.join(v.strip() for v in vals)
+            self.emit(f'enum {name} {{ {members} }}')
+        self.blank()
+
+    # ── Struct → inner class ──────────────────────────────────────────────────
+    def _struct_decl(self, item):
+        struct = item.type
+        name = struct.name or item.name or 'AStruct'
+        self.emit(f'static class {name} {{')
+        self.indent += 1
+        if struct.decls:
+            for d in struct.decls:
+                jt_, fn, is_arr, sz, is_2d, sz2 = _extract(d)
+                if is_2d:
+                    self.emit(f'{jt_}[][] {fn};')
+                elif is_arr:
+                    if sz:
+                        self.emit(f'{jt_}[] {fn} = new {jt_}[{sz}];')
+                    else:
+                        self.emit(f'{jt_}[] {fn};')
+                else:
+                    self.emit(f'{jt_} {fn};')
+        self.indent -= 1
+        self.emit('}')
+        self.blank()
 
     # ── Function def ──────────────────────────────────────────────────────────
     def visit_FuncDef(self, node):
@@ -215,8 +379,16 @@ class CToJavaVisitor(c_ast.NodeVisitor):
     def _params(self, pl):
         parts = []
         for p in pl.params:
-            jt_, nm, is_arr, _ = _extract(p)
-            parts.append(f'{jt_}[] {nm}' if is_arr else f'{jt_} {nm}')
+            if isinstance(p, c_ast.EllipsisParam):
+                parts.append('Object... _va')
+                continue
+            jt_, nm, is_arr, _, is_2d, _ = _extract(p)
+            if is_2d:
+                parts.append(f'{jt_}[][] {nm}')
+            elif is_arr:
+                parts.append(f'{jt_}[] {nm}')
+            else:
+                parts.append(f'{jt_} {nm}')
         return ', '.join(parts)
 
     # ── Compound ──────────────────────────────────────────────────────────────
@@ -237,24 +409,58 @@ class CToJavaVisitor(c_ast.NodeVisitor):
         elif isinstance(n, c_ast.Break):    self.emit('break;')
         elif isinstance(n, c_ast.Continue): self.emit('continue;')
         elif isinstance(n, c_ast.Switch):   self._switch(n)
+        elif isinstance(n, c_ast.Label):
+            self.emit(f'{n.name}:')
+            if n.stmt: self._stmt(n.stmt)
+        elif isinstance(n, c_ast.Goto):
+            self.emit(f'/* goto {n.name}; */ break; // goto not supported')
         elif isinstance(n, c_ast.Compound):
             self.indent+=1; self.visit_Compound(n); self.indent-=1
+        elif isinstance(n, c_ast.EmptyStatement):
+            pass  # skip empty statements
         else:
             self.emit(f'/* unsupported: {type(n).__name__} */')
 
     def _local(self, d):
-        jt_, nm, is_arr, sz = _extract(d)
-        if is_arr:
+        # Handle enum declarations locally
+        if isinstance(d.type, c_ast.Enum):
+            self._enum_decl(d)
+            return
+        # Handle struct declarations locally
+        if isinstance(d.type, c_ast.Struct):
+            self._struct_decl(d)
+            return
+
+        jt_, nm, is_arr, sz, is_2d, sz2 = _extract(d)
+        is_const = _is_const(d)
+        prefix = 'final ' if is_const else ''
+
+        if is_2d:
+            if d.init and isinstance(d.init, c_ast.InitList):
+                # 2D init: {{1,2},{3,4}}
+                rows = []
+                for expr in d.init.exprs:
+                    rows.append(self._e(expr))
+                vals = ', '.join(rows)
+                self.emit(f'{prefix}{jt_}[][] {nm} = {{{vals}}};')
+            elif sz and sz2:
+                self.emit(f'{prefix}{jt_}[][] {nm} = new {jt_}[{sz}][{sz2}];')
+            else:
+                self.emit(f'{prefix}{jt_}[][] {nm};')
+        elif is_arr:
             if d.init and isinstance(d.init, c_ast.InitList):
                 vals = ', '.join(self._e(e) for e in d.init.exprs)
-                self.emit(f'{jt_}[] {nm} = {{{vals}}};')
+                self.emit(f'{prefix}{jt_}[] {nm} = {{{vals}}};')
+            elif d.init:
+                # Non-InitList init (e.g. malloc) — use expression directly
+                self.emit(f'{prefix}{jt_}[] {nm} = {self._e(d.init)};')
             elif sz:
-                self.emit(f'{jt_}[] {nm} = new {jt_}[{sz}];')
+                self.emit(f'{prefix}{jt_}[] {nm} = new {jt_}[{sz}];')
             else:
-                self.emit(f'{jt_}[] {nm};')
+                self.emit(f'{prefix}{jt_}[] {nm};')
         else:
-            if d.init: self.emit(f'{jt_} {nm} = {self._e(d.init)};')
-            else:      self.emit(f'{jt_} {nm};')
+            if d.init: self.emit(f'{prefix}{jt_} {nm} = {self._e(d.init)};')
+            else:      self.emit(f'{prefix}{jt_} {nm};')
 
     def _if(self, n):
         self.emit(f'if ({self._e(n.cond)}) {{')
@@ -262,8 +468,6 @@ class CToJavaVisitor(c_ast.NodeVisitor):
         if n.iffalse:
             if isinstance(n.iffalse, c_ast.If):
                 cond2 = self._e(n.iffalse.cond)
-                # rewrite last line to "} else if ..."
-                self.output[-1] if self.output else None
                 prev = self.output.pop() if self.output and self.output[-1].strip()=='}' else None
                 if prev: self.output.append(self.ind() + f'}} else if ({cond2}) {{')
                 else:    self.emit(f'}} else if ({cond2}) {{')
@@ -285,7 +489,7 @@ class CToJavaVisitor(c_ast.NodeVisitor):
             if isinstance(n.init, c_ast.DeclList):
                 parts = []
                 for d in n.init.decls:
-                    jt_, nm, _, _ = _extract(d)
+                    jt_, nm, _, _, _, _ = _extract(d)
                     iv = self._e(d.init) if d.init else '0'
                     parts.append(f'{jt_} {nm} = {iv}')
                 init_s = ', '.join(parts)
@@ -347,6 +551,27 @@ class CToJavaVisitor(c_ast.NodeVisitor):
             if rest: self.emit(f'System.out.printf({fmt}, {", ".join(rest)});')
             else:    self.emit(f'System.out.printf({fmt});')
             return
+
+        if name == 'puts':
+            self.emit(f'System.out.println({args[0] if args else ""});')
+            return
+
+        if name == 'putchar':
+            self.emit(f'System.out.print((char){args[0]});')
+            return
+
+        if name == 'exit':
+            self.emit(f'System.exit({args[0] if args else "0"});')
+            return
+
+        if name == 'srand':
+            self.emit(f'/* srand({args[0] if args else ""}) -- Java uses Math.random() */;')
+            return
+
+        if name == 'free':
+            self.emit(f'/* free({args[0] if args else ""}) -- Java has GC */;')
+            return
+
         if name == 'scanf':
             fmt   = args[0].strip('"') if args else ''
             vars_ = args[1:]
@@ -354,12 +579,16 @@ class CToJavaVisitor(c_ast.NodeVisitor):
             i = 0
             while i < len(fmt):
                 if fmt[i]=='%' and i+1<len(fmt):
-                    specs.append(fmt[i:i+2]); i+=2
+                    # Handle longer format specs like %ld, %lf
+                    end = i+2
+                    if end < len(fmt) and fmt[end] in 'dfilscu':
+                        end += 1
+                    specs.append(fmt[i:end]); i=end
                 else: i+=1
             for idx, var in enumerate(vars_):
                 vn  = var.lstrip('&')
                 sp  = specs[idx] if idx<len(specs) else '%d'
-                if sp in ('%d','%i'):  self.emit(f'{vn} = sc.nextInt();')
+                if sp in ('%d','%i','%ld'):  self.emit(f'{vn} = sc.nextInt();')
                 elif sp == '%f':              self.emit(f'{vn} = sc.nextFloat();')
                 elif sp in ('%lf','%g'):      self.emit(f'{vn} = sc.nextDouble();')
                 elif sp == '%s':       self.emit(f'{vn} = sc.next();')

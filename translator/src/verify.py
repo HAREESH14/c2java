@@ -97,3 +97,37 @@ def compile_java_wsl(java_source: str) -> tuple[bool, str]:
             except OSError: pass
         try: os.rmdir(tmp_dir)
         except OSError: pass
+
+
+def compile_cpp_wsl(cpp_source: str) -> tuple[bool, str]:
+    """
+    Compile a C++ source string using WSL g++.
+
+    Returns:
+        (success: bool, message: str)
+    """
+    with tempfile.NamedTemporaryFile(
+        suffix='.cpp', mode='w', encoding='utf-8',
+        delete=False, dir=tempfile.gettempdir()
+    ) as tf:
+        tf.write(cpp_source)
+        cpp_path = tf.name
+
+    wsl_path = _win_to_wsl(cpp_path)
+    out_path = wsl_path.replace('.cpp', '.out')
+
+    cmd = ['wsl', 'g++', '-Wall', '-std=c++17', '-o', out_path, wsl_path]
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=15
+        )
+        ok  = result.returncode == 0
+        msg = (result.stdout + result.stderr).strip()
+        return ok, msg or 'Compiled successfully.'
+    except FileNotFoundError:
+        return False, 'WSL not found. Is WSL installed?'
+    except subprocess.TimeoutExpired:
+        return False, 'g++ timed out.'
+    finally:
+        try: os.unlink(cpp_path)
+        except OSError: pass

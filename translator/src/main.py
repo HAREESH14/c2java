@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # =============================================================================
-#  main.py  --  Unified C <-> Java Translator
+#  main.py  --  Unified Multi-Language Translator
 #
-#  Usage:
+#  Supports 4 translation directions:
 #    uv run python src/main.py input.java          -> Java -> C
 #    uv run python src/main.py input.c             -> C   -> Java
-#    uv run python src/main.py input.java --verify -> translate + WSL gcc check
-#    uv run python src/main.py input.java --ast    -> show javalang AST
-#    uv run python src/main.py                     -> interactive mode
+#    uv run python src/main.py input.c   --to cpp  -> C   -> C++
+#    uv run python src/main.py input.cpp           -> C++ -> C
+#    uv run python src/main.py input.java --verify -> translate + compiler check
+#    uv run python src/main.py input.java --ast    -> show AST
+#    uv run python src/main.py                     -> interactive demo
 # =============================================================================
 
 import sys, os, pathlib, tempfile
@@ -15,15 +17,21 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import java_to_c
 import c_to_java
-from verify import compile_c_wsl, compile_java_wsl
+import c_to_cpp
+import cpp_to_c
+from verify import compile_c_wsl, compile_java_wsl, compile_cpp_wsl
 
 
 BANNER = """\
-╔══════════════════════════════════════════════╗
-║      C  <->  Java  Unified Translator        ║
-║   Java parser : javalang                     ║
-║   C    parser : pycparser                    ║
-╚══════════════════════════════════════════════╝
++================================================+
+|    Multi-Language Source-to-Source Transpiler    |
+|                                                |
+|    Java <-> C <-> C++                          |
+|                                                |
+|    Java parser : javalang                      |
+|    C    parser : pycparser                     |
+|    C++  parser : regex-based                   |
++================================================+
 """
 
 JAVA_DEMO = """\
@@ -164,6 +172,78 @@ def run_c_to_java(path: str, out_name: str, show_ast: bool, verify: bool = False
             sys.exit(2)
 
 
+def run_c_to_cpp(path: str, out_name: str, show_ast: bool, verify: bool = False):
+    print(f'\n  Mode     : C -> C++')
+    print(f'  Parser   : pycparser (C AST)')
+    print(f'  Backend  : string emitter (C++)')
+    print('-' * 48)
+
+    if show_ast:
+        try:
+            import pycparser, re
+            src = open(path, encoding='utf-8').read()
+            src = re.sub(r'//.*?$|/\*.*?\*/', '', src, flags=re.M|re.S)
+            src = '\n'.join(l for l in src.splitlines()
+                            if not l.strip().startswith('#'))
+            parser = pycparser.CParser()
+            ast    = parser.parse(src)
+            print('\n[pycparser AST]')
+            ast.show(attrnames=True, nodenames=True)
+            print()
+        except Exception as e:
+            print(f'[AST] {e}')
+
+    try:
+        cpp_code = c_to_cpp.translate_file(path)
+    except ValueError as e:
+        print(f'[ERROR] {e}')
+        sys.exit(1)
+
+    print('\n[Generated C++ Code]')
+    print(cpp_code)
+
+    with open(out_name, 'w', encoding='utf-8') as f:
+        f.write(cpp_code)
+    print(f'\n[OK] Saved -> {out_name}')
+
+    if verify:
+        print('\n[WSL g++] Compiling generated C++...')
+        ok, msg = compile_cpp_wsl(cpp_code)
+        status  = 'PASS' if ok else 'FAIL'
+        print(f'  g++ [{status}]: {msg}')
+        if not ok:
+            sys.exit(2)
+
+
+def run_cpp_to_c(source: str, out_name: str,
+                 show_ast: bool, verify: bool = False):
+    print(f'\n  Mode     : C++ -> C')
+    print(f'  Parser   : regex-based (C++ patterns)')
+    print(f'  Backend  : string emitter (C)')
+    print('-' * 48)
+
+    try:
+        c_code = cpp_to_c.translate_string(source)
+    except ValueError as e:
+        print(f'[ERROR] {e}')
+        sys.exit(1)
+
+    print('\n[Generated C Code]')
+    print(c_code)
+
+    with open(out_name, 'w', encoding='utf-8') as f:
+        f.write(c_code)
+    print(f'\n[OK] Saved -> {out_name}')
+
+    if verify:
+        print('\n[WSL gcc] Compiling generated C...')
+        ok, msg = compile_c_wsl(c_code)
+        status  = 'PASS' if ok else 'FAIL'
+        print(f'  gcc [{status}]: {msg}')
+        if not ok:
+            sys.exit(2)
+
+
 # ---------------------------------------------------------------------------
 def main():
     print(BANNER)
@@ -171,7 +251,8 @@ def main():
     show_ast   = '--ast'    in argv
     verify     = '--verify' in argv
     demo_mode  = '--demo'   in argv
-    files      = [a for a in argv if not a.startswith('--')]
+    to_cpp     = '--to' in argv and 'cpp' in argv
+    files      = [a for a in argv if not a.startswith('--') and a not in ('cpp','java','c')]
 
     # ── Interactive / demo mode ───────────────────────────────────────────────
     if not files or demo_mode:
@@ -201,10 +282,18 @@ def main():
 
     elif ext == '.c':
         print(f'Input: {path}')
-        run_c_to_java(path, stem + '.java', show_ast, verify)
+        if to_cpp:
+            run_c_to_cpp(path, stem + '.cpp', show_ast, verify)
+        else:
+            run_c_to_java(path, stem + '.java', show_ast, verify)
+
+    elif ext == '.cpp':
+        with open(path, encoding='utf-8') as f: source = f.read()
+        print(f'Input: {path}')
+        run_cpp_to_c(source, stem + '.c', show_ast, verify)
 
     else:
-        print(f'[ERROR] Unsupported extension "{ext}". Use .java or .c')
+        print(f'[ERROR] Unsupported extension "{ext}". Use .java, .c, or .cpp')
         sys.exit(1)
 
 

@@ -1,5 +1,7 @@
 import java.util.Scanner;
 
+import java.lang.Math;
+
 public class Main {
 
     public static float add(float a, float b) {
