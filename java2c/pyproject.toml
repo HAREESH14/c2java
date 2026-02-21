@@ -1,0 +1,9 @@
+[project]
+name = "java2c"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pycparser>=3.0",
+]
