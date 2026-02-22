@@ -164,7 +164,10 @@ class ExprVisitor(c_ast.NodeVisitor):
         return f'{self.visit(n.name)}.{n.field.name}'
 
     def visit_Cast(self, n):
-        return f'({_jtype(_gtype(n.to_type.type))}){self.visit(n.expr)}'
+        expr_str = self.visit(n.expr)
+        if expr_str.startswith('new '):
+            return expr_str
+        return f'({_jtype(_gtype(n.to_type.type))}){expr_str}'
 
     def visit_TernaryOp(self, n):
         return f'({self.visit(n.cond)} ? {self.visit(n.iftrue)} : {self.visit(n.iffalse)})'

@@ -38,32 +38,34 @@ The translation pipeline relies on robust language parsers to build an AST, foll
 
 Evaluated on 40 diverse programs (10 per language) across all translation directions. A translation is considered a "PASS" only if the target output successfully compiles with standard compilers (`gcc`, `g++`, `javac`).
 
-| Direction | Pass Rate | Compilable Features | Primary Failure Cases |
-|-----------|-----------|--------------------|-----------------------|
-| **C → Java** | 80% (8/10) | Math, loops, arrays, `switch` | Pointers, complex `struct` mapping |
-| **C → C++** | 80% (8/10) | I/O, strings, standard libraries | Raw pointers requiring lifetime tracking |
-| **Java → C** | 70% (7/10) | Control flow, basic math, recursion | High-level APIs (`String` manipulation), multi-dimensional arrays |
-| **C++ → C** | 90% (9/10) | OOP (classes, inheritance, templates) | Deeply nested `enum class`, complex templates |
-| **OVERALL** | **80% (32/40)** | | |
+| Direction    | Pass Rate       | Compilable Features                   | Primary Failure Cases                                             |
+| ------------ | --------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| **C → Java** | 80% (8/10)      | Math, loops, arrays, `switch`         | Pointers, complex `struct` mapping                                |
+| **C → C++**  | 80% (8/10)      | I/O, strings, standard libraries      | Raw pointers requiring lifetime tracking                          |
+| **Java → C** | 70% (7/10)      | Control flow, basic math, recursion   | High-level APIs (`String` manipulation), multi-dimensional arrays |
+| **C++ → C**  | 90% (9/10)      | OOP (classes, inheritance, templates) | Deeply nested `enum class`, complex templates                     |
+| **OVERALL**  | **80% (32/40)** |                                       |                                                                   |
 
 ## Comparison with Existing Tools
 
-| Feature | This Project | C2Rust | CxGo | Tangible |
-|---------|--------------|--------|------|----------|
-| **Supported Languages** | Java, C, C++ | C, Rust | C, Go | C#, Java, C++ |
-| **Parsing Strategy** | Full AST | Full AST | Full AST | Regex / AST |
-| **OOP Translation** | Advanced (Inheritance/vtable) | N/A | N/A | Standard |
-| **Multi-file Batch** | Yes | Yes | Yes | Yes |
-| **Research Focus** | High (Educational) | High (Safety) | Medium | Commercial |
+| Feature                 | This Project                  | C2Rust        | CxGo     | Tangible      |
+| ----------------------- | ----------------------------- | ------------- | -------- | ------------- |
+| **Supported Languages** | Java, C, C++                  | C, Rust       | C, Go    | C#, Java, C++ |
+| **Parsing Strategy**    | Full AST                      | Full AST      | Full AST | Regex / AST   |
+| **OOP Translation**     | Advanced (Inheritance/vtable) | N/A           | N/A      | Standard      |
+| **Multi-file Batch**    | Yes                           | Yes           | Yes      | Yes           |
+| **Research Focus**      | High (Educational)            | High (Safety) | Medium   | Commercial    |
 
 ## Installation & Usage
 
 ### Prerequisites
+
 - Python 3.8+
 - `uv` (Fast Python package installer)
 - WSL (Windows Subsystem for Linux) with `gcc`, `g++`, and `javac` installed (for the `--verify` flag)
 
 ### Setup
+
 ```bash
 # Provide python virtual environment
 uv venv
@@ -111,15 +113,45 @@ c_code = cpp_to_c.translate_string(cpp_code)
 print(c_code)
 ```
 
-## Limitations & Future Work
+## Known Bugs & Limitations
 
-Honest constraints of the current implementation:
+Based on rigorous accuracy metrics, the translator successfully compiles **80%** of varied code samples. The remaining 20% fail due to the following known limitations of AST-based syntactical translation:
 
-1. **Semantic Equivalence:** The tool guarantees syntactic translation and high compile rates, but runtime logic equivalence (e.g., matching C integer overflow behavior in Java) is outside the current scope.
-2. **Memory Management:** `new`/`delete` and `malloc`/`free` are translated directly. It does not implement garbage collection logic when moving from Java to C, leading to potential memory leaks in translated C code.
-3. **Complex C++ Templates:** Simple function templates are converted to C macros, but generic classes, SFINAE, and template metaprogramming are ignored.
-4. **Header Resolution:** In batch mode, C/C++ header files are copied as-is rather than dynamically included across standard library paths.
-5. **Standard Libraries:** Only a subset of `java.lang`, `<stdio.h>`, and `<iostream>` are mapped. Advanced standard library features (like threading or file streams) translate with limited fidelity.
+### 1. Pointer Dereferencing (C → Java)
+
+Java lacks scalar pointers. While `malloc` successfully translates to `new int[]`, dereferencing fails:
+
+- **C:** `*p = 42;`
+- **Translated Java:** `p = 42;` (Compiler Error: incompatible types)
+- _Workaround:_ Manual refactoring to `p[0] = 42;` or using object wrappers.
+
+### 2. Struct Instantiation (C → Java)
+
+C allows stack allocation of `structs`, which Java does not support without `new`:
+
+- **C:** `struct Point p; p.x = 10;`
+- **Translated Java:** `Point p; p.x = 10;` (Compiler Error: variable p might not have been initialized)
+- _Workaround:_ Change C code to use pointers for structs or manually add `new Point()` in Java.
+
+### 3. Array Length Mapping (Java → C)
+
+Java's `.length` property on arrays does not translate directly because C arrays decay to pointers.
+
+- **Java:** `arr.length`
+- **Translated C:** `length` (Compiler Error: 'length' undeclared)
+- _Workaround:_ Pass array sizes explicitly in C or use a macro like `sizeof(arr)/sizeof(arr[0])` for static arrays.
+
+### 4. C++ Scoped Enums (C++ → C)
+
+C++ `enum class` requires scope resolution (`Color::RED`), which is invalid in standard C.
+
+- **C++:** `Color c = Color::RED;`
+- **Translated C:** `Color c = Color::RED;` (Compiler Error: expected expression before 'Color')
+- _Workaround:_ Use traditional C-style enums (`enum Color { RED }; Color c = RED;`).
+
+### 5. Math Library Linking (Java → C)
+
+Translating `Math.sqrt()` to `sqrt()` in C works syntactically, but compiling the resulting C code requires explicitly linking the math library (`-lm` flag). While not a strict translation bug, it causes automated compile steps to fail with "undefined reference to `sqrt`".
 
 ## Testing
 
