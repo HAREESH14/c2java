@@ -71,6 +71,10 @@ class JavaToCVisitor:
         self.fwd_decls     = []
         self._fi_ctr       = 0
         self._al_ctr       = 0
+        # Array tracking for .length handling
+        self.array_params  = {}  # {param_name: uses_length}
+        self.local_arrays  = {}  # {var_name: size_expr}
+        self.array_names_needing_lengths = set()  # Arrays that use .length
 
     # ── Top-level ─────────────────────────────────────────────────────────────
     def translate(self, tree: jt.CompilationUnit) -> str:
@@ -126,6 +130,25 @@ class JavaToCVisitor:
     def _method(self, m: jt.MethodDeclaration) -> str:
         is_main   = m.name == 'main'
         ret       = 'int' if is_main else (_ctype(m.return_type.name) if m.return_type else 'void')
+        
+        # Reset tracking for this method
+        self.array_params = {}
+        self.local_arrays = {}
+        self.array_names_needing_lengths = set()
+        
+        # Pre-scan method body to find .length usage on array parameters
+        array_param_names = set()
+        if not is_main:
+            for p in (m.parameters or []):
+                dims = list(getattr(p.type,'dimensions',[]) or [])
+                if p.varargs or dims:
+                    array_param_names.add(p.name)
+                    self.array_params[p.name] = False  # Will set True if .length is used
+        
+        # Scan for .length usage
+        self._scan_for_array_length(m.body, array_param_names)
+        
+        # Build parameter list with added length parameters
         params    = []
         if not is_main:
             for p in (m.parameters or []):
@@ -133,6 +156,9 @@ class JavaToCVisitor:
                 dims = list(getattr(p.type,'dimensions',[]) or [])
                 if p.varargs or dims:
                     params.append(_decl(p.name, c_ast.ArrayDecl(_tdecl(p.name,base),None,[])))
+                    # If this array uses .length, add a length parameter
+                    if p.name in self.array_names_needing_lengths:
+                        params.append(_decl(f'{p.name}_len', _tdecl(f'{p.name}_len', 'int')))
                 else:
                     params.append(_decl(p.name, _tdecl(p.name, base)))
 
@@ -146,6 +172,97 @@ class JavaToCVisitor:
         if not is_main:
             self.fwd_decls.append(GEN.visit(decl) + ';')
         return GEN.visit(fdef)
+    
+    # ── Scan for array.length usage ───────────────────────────────────────────
+    def _scan_for_array_length(self, nodes, array_param_names):
+        """Pre-scan method body to find which array parameters use .length"""
+        if nodes is None:
+            return
+        if not isinstance(nodes, list):
+            nodes = [nodes]
+        
+        for node in nodes:
+            if node is None:
+                continue
+            
+            # Check for variable declarations with .length in initializer
+            if isinstance(node, (jt.LocalVariableDeclaration, jt.VariableDeclaration)):
+                for declarator in (node.declarators or []):
+                    if declarator.initializer:
+                        self._scan_expr_for_length(declarator.initializer, array_param_names)
+            
+            # Check for MethodInvocation with .length
+            if isinstance(node, jt.MethodInvocation):
+                if node.member == 'length' and node.qualifier and not node.arguments:
+                    if node.qualifier in array_param_names:
+                        self.array_names_needing_lengths.add(node.qualifier)
+            
+            # Check for MemberReference with .length (property access)
+            if isinstance(node, jt.MemberReference):
+                if node.member == 'length' and node.qualifier:
+                    if node.qualifier in array_param_names:
+                        self.array_names_needing_lengths.add(node.qualifier)
+            
+            # Handle ForStatement with ForControl
+            if isinstance(node, jt.ForStatement):
+                if hasattr(node, 'control') and node.control:
+                    ctrl = node.control
+                    # Scan init, condition, and update
+                    if hasattr(ctrl, 'init'):
+                        if isinstance(ctrl.init, list):
+                            self._scan_for_array_length(ctrl.init, array_param_names)
+                        else:
+                            self._scan_expr_for_length(ctrl.init, array_param_names)
+                    if hasattr(ctrl, 'condition'):
+                        self._scan_expr_for_length(ctrl.condition, array_param_names)
+                    if hasattr(ctrl, 'update'):
+                        if isinstance(ctrl.update, list):
+                            for u in ctrl.update:
+                                self._scan_expr_for_length(u, array_param_names)
+                        else:
+                            self._scan_expr_for_length(ctrl.update, array_param_names)
+            
+            # Recursively scan nested structures
+            if hasattr(node, 'statements'):
+                self._scan_for_array_length(node.statements, array_param_names)
+            if hasattr(node, 'body'):
+                self._scan_for_array_length(node.body, array_param_names)
+            if hasattr(node, 'block'):
+                self._scan_for_array_length(node.block, array_param_names)
+            if hasattr(node, 'condition'):
+                self._scan_expr_for_length(node.condition, array_param_names)
+            if hasattr(node, 'expression'):
+                self._scan_expr_for_length(node.expression, array_param_names)
+            if hasattr(node, 'value'):
+                self._scan_expr_for_length(node.value, array_param_names)
+    
+    def _scan_expr_for_length(self, expr, array_param_names):
+        """Scan an expression for .length usage"""
+        if expr is None:
+            return
+        
+        # Check for MethodInvocation with .length
+        if isinstance(expr, jt.MethodInvocation):
+            if expr.member == 'length' and expr.qualifier and not expr.arguments:
+                if expr.qualifier in array_param_names:
+                    self.array_names_needing_lengths.add(expr.qualifier)
+        
+        # Check for MemberReference with .length (property access)
+        if isinstance(expr, jt.MemberReference):
+            if expr.member == 'length' and expr.qualifier:
+                if expr.qualifier in array_param_names:
+                    self.array_names_needing_lengths.add(expr.qualifier)
+        
+        # Recursively check sub-expressions
+        if hasattr(expr, 'operandl'):
+            self._scan_expr_for_length(expr.operandl, array_param_names)
+        if hasattr(expr, 'operandr'):
+            self._scan_expr_for_length(expr.operandr, array_param_names)
+        if hasattr(expr, 'expression'):
+            self._scan_expr_for_length(expr.expression, array_param_names)
+        if hasattr(expr, 'arguments'):
+            for arg in (expr.arguments or []):
+                self._scan_expr_for_length(arg, array_param_names)
 
     # ── Statement list ────────────────────────────────────────────────────────
     def _stmts(self, lst):
@@ -251,10 +368,15 @@ class JavaToCVisitor:
                 if isinstance(init, jt.ArrayCreator):
                     dim_e = self._expr(init.dimensions[0]) if init.dimensions else None
                     results.append(_decl(name, c_ast.ArrayDecl(_tdecl(name,base_c),dim_e,[])))
+                    # Track array size if dimension is a literal
+                    if init.dimensions and isinstance(init.dimensions[0], jt.Literal):
+                        self.local_arrays[name] = init.dimensions[0].value
                 elif isinstance(init, jt.ArrayInitializer):
                     vals = [self._expr(v) for v in init.initializers]
                     results.append(_decl(name, c_ast.ArrayDecl(_tdecl(name,base_c),None,[]),
                                         c_ast.InitList(vals)))
+                    # Track array size from initializer count
+                    self.local_arrays[name] = str(len(init.initializers))
                 else:
                     results.append(_decl(name, c_ast.ArrayDecl(_tdecl(name,base_c),None,[])))
             elif ndim == 2:
@@ -437,6 +559,19 @@ class JavaToCVisitor:
             return _id('INT_MAX')
         if q == 'Integer' and node.member == 'MIN_VALUE':
             return _id('INT_MIN')
+        
+        # Handle .length on array parameters or local arrays
+        if node.member == 'length' and q:
+            if q in self.array_names_needing_lengths:
+                # This is an array parameter, use the _len parameter
+                return _id(f'{q}_len')
+            elif q in self.local_arrays:
+                # This is a local array with known size, use the size constant
+                return _const('int', self.local_arrays[q])
+            else:
+                # Assume it's a String and use strlen()
+                self.has_string_h = True
+                return c_ast.FuncCall(_id('strlen'), c_ast.ExprList([_id(q)]))
 
         base = _id(node.member)
         for sel in (node.selectors or []):
@@ -472,8 +607,14 @@ class JavaToCVisitor:
             return c_ast.BinaryOp('==',
                 c_ast.FuncCall(_id('strcmp'),c_ast.ExprList([_id(q)]+args)),_const('int','0'))
         if m == 'length' and q and not args:
-            self.has_string_h = True
-            return c_ast.FuncCall(_id('strlen'), c_ast.ExprList([_id(q)]))
+            # Check if this is an array parameter that uses .length
+            if q in self.array_names_needing_lengths:
+                # Use the length parameter passed in
+                return _id(f'{q}_len')
+            else:
+                # Otherwise assume it's a String and use strlen()
+                self.has_string_h = True
+                return c_ast.FuncCall(_id('strlen'), c_ast.ExprList([_id(q)]))
         if m == 'charAt' and q and args:
             return c_ast.ArrayRef(_id(q), args[0])
         if m == 'indexOf' and q and args:
@@ -550,6 +691,19 @@ class JavaToCVisitor:
             return c_ast.StructRef(_id(q), '.', _id('size'))
 
         # ── Default ──
+        # ── Default: Regular function call ──
+        # Check if any arguments are arrays that need length parameters
+        enhanced_args = []
+        for arg in (args or []):
+            enhanced_args.append(arg)
+            # If this is an ID node referring to an array variable, add its length
+            if isinstance(arg, c_ast.ID):
+                arr_name = arg.name
+                # Check if it's a tracked array with known size
+                if arr_name in self.local_arrays:
+                    enhanced_args.append(_const('int', self.local_arrays[arr_name]))
+        
+        al = c_ast.ExprList(enhanced_args) if enhanced_args else None
         return c_ast.FuncCall(_id(m), al)
 
     def _scanf_call(self, method):

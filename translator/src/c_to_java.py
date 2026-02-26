@@ -25,7 +25,11 @@ TYPE_MAP = {
     'bool':'boolean','_Bool':'boolean',
     'unsigned int':'int','unsigned char':'int','unsigned long':'long',
     'unsigned short':'short','signed':'int','size_t':'int',
+    'long long':'long','unsigned long long':'long','long double':'double',
 }
+
+# Operators that produce a boolean in Java (no != 0 wrap needed)
+_BOOL_OPS = {'==','!=','<','>','<=','>=','&&','||','!'}
 
 PRINTF_FUNCS = {'printf','fprintf'}
 
@@ -190,7 +194,10 @@ class ExprVisitor(c_ast.NodeVisitor):
 
 def _gtype(t):
     if isinstance(t, c_ast.TypeDecl):    return _gtype(t.type)
-    if isinstance(t, c_ast.IdentifierType): return ' '.join(t.names)
+    if isinstance(t, c_ast.IdentifierType):
+        # collapse multi-word C types: 'long long' -> 'long long' key in TYPE_MAP
+        joined = ' '.join(t.names)
+        return joined
     if isinstance(t, (c_ast.PtrDecl, c_ast.ArrayDecl, c_ast.FuncDecl)):
         return _gtype(t.type)
     return 'void'
@@ -224,10 +231,17 @@ def _extract(decl):
             if inner_type == 'char':
                 return ('String', name, True, arr_sz, False, None)
             return (_jtype(inner_type), name, True, arr_sz, True, arr_sz2)
-        # char[] -> String in Java (same as char*)
+        # char[N] with explicit size -> char[] so we can index it with s[i]
+        # char name[] = "str" has no dim -> treat as String
         inner_type = _gtype(dtype.type)
         if inner_type == 'char':
-            return ('String', name, False, None, False, None)
+            if dtype.dim is not None:
+                # Sized: char s[100] -> char[] s = new char[100]
+                arr_sz_val = ExprVisitor().visit(dtype.dim)
+                return ('char', name, True, arr_sz_val, False, None)
+            else:
+                # Unsized: char name[] = "hello" -> String name
+                return ('String', name, False, None, False, None)
         is_arr = True
         arr_sz = ExprVisitor().visit(dtype.dim) if dtype.dim else None
         dtype  = dtype.type
@@ -247,6 +261,24 @@ def _uses_scanf(node):
             if isinstance(n.name,c_ast.ID) and n.name.name=='scanf': self.found=True
             self.generic_visit(n)
     f=F(); f.visit(node); return f.found
+
+
+def _to_bool_cond(expr_str: str) -> str:
+    """Wrap a C condition expression for Java boolean context.
+    Java requires boolean in if/while conditions; C uses int.
+    If expr already has a comparison or logical operator, leave it.
+    Otherwise append != 0.
+    """
+    s = expr_str.strip()
+    # Already a boolean-shaped expression?
+    for op in ('==', '!=', ' < ', ' > ', '<=', '>=', ' && ', ' || ', '!'):
+        if op in s:
+            return s
+    # Literal true/false
+    if s in ('true', 'false'):
+        return s
+    # Plain variable / array access / negation — wrap with != 0
+    return f'({s}) != 0'
 
 
 # ---------------------------------------------------------------------------
@@ -466,11 +498,12 @@ class CToJavaVisitor(c_ast.NodeVisitor):
             else:      self.emit(f'{prefix}{jt_} {nm};')
 
     def _if(self, n):
-        self.emit(f'if ({self._e(n.cond)}) {{')
+        cond = _to_bool_cond(self._e(n.cond))
+        self.emit(f'if ({cond}) {{')
         self.indent+=1; self._stmt(n.iftrue); self.indent-=1
         if n.iffalse:
             if isinstance(n.iffalse, c_ast.If):
-                cond2 = self._e(n.iffalse.cond)
+                cond2 = _to_bool_cond(self._e(n.iffalse.cond))
                 prev = self.output.pop() if self.output and self.output[-1].strip()=='}' else None
                 if prev: self.output.append(self.ind() + f'}} else if ({cond2}) {{')
                 else:    self.emit(f'}} else if ({cond2}) {{')
@@ -507,7 +540,8 @@ class CToJavaVisitor(c_ast.NodeVisitor):
         self.indent-=1; self.emit('}')
 
     def _while(self, n):
-        self.emit(f'while ({self._e(n.cond)}) {{')
+        cond = _to_bool_cond(self._e(n.cond))
+        self.emit(f'while ({cond}) {{')
         self.indent+=1
         if isinstance(n.stmt, c_ast.Compound): self.visit_Compound(n.stmt)
         else: self._stmt(n.stmt)
@@ -518,12 +552,22 @@ class CToJavaVisitor(c_ast.NodeVisitor):
         self.indent+=1
         if isinstance(n.stmt, c_ast.Compound): self.visit_Compound(n.stmt)
         else: self._stmt(n.stmt)
-        self.indent-=1; self.emit(f'}} while ({self._e(n.cond)});')
+        cond = _to_bool_cond(self._e(n.cond))
+        self.indent-=1; self.emit(f'}} while ({cond});')
 
     def _return(self, n):
         if n.expr:
             v = self._e(n.expr)
-            self.emit('return;' if (self.is_main and v=='0') else f'return {v};')
+            if self.is_main and v == '0':
+                self.emit('return;')
+                return
+            # If returning a C comparison result (boolean) from an int function, wrap it
+            # so Java doesn't complain about mismatched types
+            if isinstance(n.expr, c_ast.BinaryOp) and n.expr.op in ('==','!=','<','>','<=','>='):
+                if not self.is_main:
+                    self.emit(f'return ({v}) ? 1 : 0;')
+                    return
+            self.emit(f'return {v};')
         else:
             self.emit('return;')
 
